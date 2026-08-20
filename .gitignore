@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# Node / pnpm
+node_modules/
+*.log
+
+# Decoded session data (large, regenerable via python app.py --sync)
+decoded-sessions/
+
+# Temp / scratch
+tmp/
+*.tmp
+_*.mjs
+_*.py
+
+# IDE
+.vscode/
+.idea/
+.DS_Store
+
+# Local config
+.env
+*.local

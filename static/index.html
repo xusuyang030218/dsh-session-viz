@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DSH Session Log Visualizer</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div id="app">
+  <!-- ======= Sidebar ======= -->
+  <aside id="sidebar">
+    <div class="brand">
+      <div class="brand-logo">DSH</div>
+      <div class="brand-text">
+        <strong>Session Viz</strong>
+        <span>日志可视化</span>
+      </div>
+    </div>
+    <div class="sidebar-actions">
+      <input id="session-search" type="search" placeholder="搜索会话…" autocomplete="off">
+      <button id="btn-sort" class="btn ghost" title="切换排序">时间 ↓</button>
+      <button id="btn-rescan" class="btn ghost" title="重新扫描">↻</button>
+    </div>
+    <div id="dir-filter" class="dir-filter"></div>
+    <div id="session-list" class="session-list"></div>
+    <div class="sidebar-foot">
+      <span id="scan-info"></span>
+    </div>
+  </aside>
+
+  <!-- ======= Main ======= -->
+  <main id="main">
+    <!-- List view -->
+    <section id="view-list" class="view">
+      <header class="page-head">
+        <h1>会话列表</h1>
+        <p class="sub">扫描 <code id="decoded-dir"></code> 目录下的已解压会话日志</p>
+      </header>
+      <div id="session-cards" class="session-cards"></div>
+    </section>
+
+    <!-- Detail view -->
+    <section id="view-detail" class="view hidden">
+      <header class="detail-head">
+        <button id="btn-back" class="btn ghost">← 返回列表</button>
+        <div class="detail-title-wrap">
+          <h1 id="detail-title">—</h1>
+          <div class="detail-meta" id="detail-meta"></div>
+        </div>
+        <div class="detail-actions">
+          <a id="btn-export" class="btn primary" href="#" download>导出报告</a>
+        </div>
+      </header>
+      <nav id="tabs" class="tabs"></nav>
+      <div id="tab-content" class="tab-content"></div>
+    </section>
+  </main>
+</div>
+
+<!-- Event detail modal -->
+<div id="modal" class="modal hidden">
+  <div class="modal-backdrop" data-close></div>
+  <div class="modal-box">
+    <div class="modal-head">
+      <h3 id="modal-title">事件详情</h3>
+      <button class="btn ghost" data-close>✕</button>
+    </div>
+    <div id="modal-body" class="modal-body"></div>
+  </div>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>

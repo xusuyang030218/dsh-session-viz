@@ -1,0 +1,53 @@
+{
+  "name": "dsh-session-viz",
+  "version": "1.0.0",
+  "description": "DSH 会话日志在线可视化：会话头部「查看日志」按钮 → 左栏源日志（14 组配色分类）+ 右栏逐条解析。随 harness 启动，零外部依赖。",
+  "type": "module",
+  "main": "lib/host/index.mjs",
+  "exports": {
+    ".": "./lib/host/index.mjs",
+    "./web": "./lib/host/web.mjs",
+    "./parser": "./lib/host/parser.mjs",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-host-webserver": "*",
+    "@deepseek-ai/dsh-client-runtime": "*",
+    "@deepseek-ai/dsh-client-ui-slots": "*"
+  },
+  "files": [
+    "lib",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "dsh-plugin",
+    "session",
+    "log",
+    "visualizer",
+    "timeline",
+    "jsonl"
+  ],
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node run_tests.py"
+  },
+  "license": "Apache-2.0",
+  "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c"
+}

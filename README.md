@@ -1,0 +1,136 @@
+# DSH Session Log Visualizer
+
+将 DSH（DeepSeek Harness）的会话日志（zstd 压缩的 JSONL）解析并可视化为
+在线可浏览的网页。
+
+> 需求文档见 [REQUIREMENTS.md](REQUIREMENTS.md)。
+> 界面设计依据 [UI_IMPROVEMENT.md](UI_IMPROVEMENT.md) 与
+> [PRODUCT_REDESIGN.md](PRODUCT_REDESIGN.md)（三层渐进式信息架构）。
+
+## 插件模式（推荐，随 harness 启动）
+
+本仓库同时是一个 **DSH web 插件**：安装后在会话头部（右上角）
+「Session log」下载按钮**左侧**新增 **📜 查看日志** 按钮，点击直接在
+当前页面打开全屏查看器。查看器采用**三层渐进式**设计：
+
+| 层 | 视图 | 面向用户 | 内容 |
+|----|------|----------|------|
+| 第一层 | 📋 摘要 | 所有人 | 执行摘要卡片：用户需求、轮次/步骤/耗时、工具使用 Top（图标+中文名）、审批结果、文件变更记录、Token 用量，无技术术语 |
+| 第二层 | 📖 故事线 | 管理者 | 叙事式时间线：人类语言描述（「📖 AI 读取了 REQUIREMENTS.md」「⚠️ 请求审批 → ✅ 已批准」），推理折叠为摘要，点击展开 |
+| 第三层 | 🔬 事件树 | 开发者 | turn → step → 合并事件组 树形结构，按 14 组配色着色，搜索框 + 分组类型下拉，毫秒级/相对时间，右侧会话概览或事件详情 |
+
+**UI 改进落实**（UI_IMPROVEMENT.md）：
+- 筛选区精简为「搜索框 + 事件类型分组下拉」（改动 1）
+- 日志列表树形折叠，同类 chunks 合并为可展开节点（改动 2 / 6）
+- 毫秒级时间戳 + 相对时间（改动 3）
+- 右侧默认显示会话概览卡片（改动 4）
+- 按事件类型定制预览：工具→文件名、结果→行数、todo→状态统计（改动 5）
+
+安装（web profile）：
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm add dsh-session-viz@link:D:/dsh-session-viz
+# 并把 "dsh-session-viz" 加入 package.json 的 dsh.profile.bundles
+# 重启 pnpm dsh web 后生效
+```
+
+插件文件：
+- `lib/host/parser.mjs` — 多帧 zstd 解码 + JSONL 解析（Node 版解析器）
+- `lib/host/narrative.mjs` — 叙述转换层（摘要/故事线/事件树）
+- `lib/host/web.mjs` — 同源 API：`/dsh-session-viz/api/{meta,sessions,summary,story,tree,log,line}`
+- `lib/client.js` — 会话头部按钮 + 三层查看器
+- `cordis.patch.yml` — bundle 补丁（host 两半：主半 + web 半）
+
+## 独立 Web 模式（可选）
+
+```bash
+# 1. 安装依赖（fastapi / uvicorn / zstandard）
+pip install -r requirements.txt
+
+# 2.（可选）把 ~/.dsh/sessions 下最新的 zstd 日志重新解码到 decoded-sessions/
+python app.py --sync
+
+# 3. 启动服务
+python app.py --port 8765
+```
+
+打开浏览器访问 **http://127.0.0.1:8765** 。
+
+## 功能一览
+
+| 功能 | 说明 |
+|------|------|
+| 三层视图 | 📋 摘要卡片（所有人）→ 📖 故事线（管理者）→ 🔬 事件树（开发者） |
+| 摘要卡片 | 用户需求、轮次/步骤/耗时、工具使用 Top（图标+中文名）、审批结果、文件变更、Token |
+| 故事线 | 叙事式时间线，人类语言描述工具/审批/推理，点击展开详情 |
+| 事件树 | turn → step → 合并事件组 树形折叠，14 组配色，chunks 同类合并 |
+| 事件搜索 | 搜索框（摘要/类型/内容高亮）+ 按功能分组的事件类型下拉 |
+| 时间精度 | 毫秒级绝对时间 + 相对会话开始时间（+1.2s） |
+| 右侧面板 | 未选中显示会话概览，选中显示事件详情（解读/JSON/原始行） |
+| 原始数据 | JSONL 只读视图，按 seq 跳转，当前事件按分组色高亮 |
+
+## 目录结构
+
+```
+dsh-session-viz/
+├── REQUIREMENTS.md        # 需求文档（数据格式 + 14 组配色 + F1-F10）
+├── UI_IMPROVEMENT.md      # UI 改版意见（6 项改动：树形/下拉/时间戳/概览/预览/合并）
+├── PRODUCT_REDESIGN.md    # 产品重新定位（三层渐进式：摘要→故事线→技术详情）
+├── analyze.py             # 数据分析脚本（既有）
+├── app.py                 # FastAPI 后端（独立 Web 模式）
+├── package.json           # DSH 插件清单（dsh.bundle + dsh.client）
+├── cordis.patch.yml       # 插件 bundle 补丁
+├── lib/
+│   ├── host/
+│   │   ├── index.mjs      # 插件主 host 半
+│   │   ├── web.mjs        # 插件同源 API 路由（/dsh-session-viz/api）
+│   │   ├── parser.mjs     # Node 版解析器（多帧 zstd + JSONL + 14 组配色）
+│   │   └── narrative.mjs  # 叙述转换层（摘要/故事线/事件树 + 人类语言映射）
+│   ├── client.js          # 插件浏览器半（头部按钮 + 三层查看器）
+│   ├── decompressor.py    # Python 解压（独立模式用）
+│   ├── parser.py          # Python 解析器（独立模式用）
+│   └── models.py          # Python 数据模型 + 14 组颜色方案
+├── static/                # 独立 Web 模式前端
+├── decoded-sessions/      # 已解压的会话数据
+├── scripts/build.mjs      # 插件构建校验（零转译）
+├── tests/test_parser.py   # 单元测试
+└── requirements.txt
+```
+
+## 插件 API（host 半）
+
+| 端点 | 说明 |
+|------|------|
+| `GET /dsh-session-viz/api/meta` | 14 组配色方案（前端主题） |
+| `GET /dsh-session-viz/api/sessions?q=` | 会话列表（轻量元信息，可搜索） |
+| `GET /dsh-session-viz/api/summary?sessionId=` | 执行摘要卡片（第一层） |
+| `GET /dsh-session-viz/api/story?sessionId=` | 执行故事线（第二层） |
+| `GET /dsh-session-viz/api/tree?sessionId=` | 技术事件树（第三层，含 typeCounts） |
+| `GET /dsh-session-viz/api/log?sessionId=&from=&to=&q=` | 会话日志分页事件（q=全文搜索） |
+| `GET /dsh-session-viz/api/line?sessionId=&line=` | 单行事件的完整解析 + 原始 JSON |
+
+## API
+
+| 端点 | 说明 |
+|------|------|
+| `GET /api/sessions` | 会话列表（轻量扫描） |
+| `GET /api/sessions/{dir}/{id}` | 会话摘要 + 统计 |
+| `GET /api/sessions/{dir}/{id}/events` | 事件列表（type/group/q/时间范围/行区间筛选，分页） |
+| `GET /api/sessions/{dir}/{id}/events/{seq}` | 按 seq 取单个事件与原始行 |
+| `GET /api/sessions/{dir}/{id}/timeline` | 时间线（turn/step 聚合，事件按需加载） |
+| `GET /api/sessions/{dir}/{id}/tools` | 工具调用列表 |
+| `GET /api/sessions/{dir}/{id}/reasoning` | 合并后的推理文本 |
+| `GET /api/sessions/{dir}/{id}/tokens` | Token 用量 |
+| `GET /api/sessions/{dir}/{id}/approvals` | 审批配对 |
+| `GET /api/sessions/{dir}/{id}/todos` | 任务清单快照 |
+| `GET /api/sessions/{dir}/{id}/raw?seq=` | 原始 JSONL（按行区间或 seq 跳转） |
+| `GET /api/sessions/{dir}/{id}/export` | 静态 HTML 报告 |
+| `POST /api/sync` | 重新解码 zstd 源 |
+| `GET /api/meta` | 14 组配色与分组顺序（前端主题） |
+
+## 测试
+
+```bash
+python run_tests.py
+```

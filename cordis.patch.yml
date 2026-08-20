@@ -1,0 +1,15 @@
+# dsh-session-viz bundle patch：插入 host 半。
+#   dsh-session-viz      主 host 半（main；仅注册一个 info 工具，任何 profile 可用）
+#   dsh-session-viz-web  web 数据路由半（./web；依赖 webServer，仅 web profile 激活）
+# 浏览器半（会话头部「查看日志」按钮 + 左右分栏查看器）由官方 client-modules 扫描
+# dsh.client 声明后，以 /plugins/dsh-session-viz/client.js 自动供给浏览器。
+- insert:
+    - id: dsh-session-viz
+      name: dsh-session-viz
+      config:
+        sessionsPath: !!js dshHomePath('sessions')
+
+    - id: dsh-session-viz-web
+      name: 'dsh-session-viz/web'
+      config:
+        sessionsPath: !!js dshHomePath('sessions')
