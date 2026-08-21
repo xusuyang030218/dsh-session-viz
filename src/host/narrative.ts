@@ -30,6 +30,12 @@ export interface FileChange {
   time: number | null
   lines: number | null
   error: boolean
+  /** 变更内容：write 为完整新内容；edit 为 old/new 片段（前端做 diff） */
+  content?: string
+  oldString?: string
+  newString?: string
+  /** 变更是否完整可见（edit 的 old/new 完整，write 的内容可能很长） */
+  preview?: string
 }
 
 export interface SummaryData {
@@ -456,7 +462,9 @@ export function buildSummary(
     } else if (t === "request/context" && !summary.model) {
       summary.model = modelLabel(d.model)
     } else if (t === "tool/call") {
-      toolCalls.push({ callId: d.callId as string | null, name: d.name as string | null, args: d.arguments })
+      let argsObj: Record<string, unknown> | null = null
+      try { argsObj = JSON.parse(String(d.arguments ?? "{}")) } catch { argsObj = null }
+      toolCalls.push({ callId: d.callId as string | null, name: d.name as string | null, args: argsObj })
     } else if (t === "approval/asked") {
       pendingApproval.set(d.id as string, { toolName: d.toolName, time: (o.time as number) ?? null })
     } else if (t === "approval/decided") {
@@ -470,14 +478,22 @@ export function buildSummary(
       const isError = Boolean(d.error)
       const tc = toolCalls.find((c) => c.callId === src)
       const name = tc?.name ?? null
-      const path = (metaObj.path as string) ?? (tc ? pathFromArgs(tc.args) : null)
+      const path = (metaObj.path as string) ?? (tc ? pathFromArgs(JSON.stringify(tc.args)) : null)
       if (path && (name === "write" || name === "edit")) {
+        const args = (tc?.args ?? {}) as Record<string, unknown>
+        const content = args.content as string | undefined
+        const oldString = (args.old_string ?? args.oldString) as string | undefined
+        const newString = (args.new_string ?? args.newString) as string | undefined
         summary.files.push({
           path,
           action: metaObj.created ? "created" : "modified",
           time: (o.time as number) ?? null,
           lines: (metaObj.totalLines as number) ?? null,
           error: isError,
+          content: name === "write" ? content : undefined,
+          oldString: name === "edit" ? oldString : undefined,
+          newString: name === "edit" ? newString : undefined,
+          preview: name === "edit" ? newString?.slice(0, 120) : content?.slice(0, 120),
         })
       }
       if (src) {
