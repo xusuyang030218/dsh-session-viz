@@ -7,6 +7,8 @@ venv/
 # Node / pnpm
 node_modules/
 *.log
+*.tsbuildinfo
+pnpm-lock.yaml
 
 # Decoded session data (large, regenerable via python app.py --sync)
 decoded-sessions/

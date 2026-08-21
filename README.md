@@ -57,11 +57,13 @@ pnpm add dsh-session-viz@link:D:/dsh-session-viz
 ```
 
 插件文件：
-- `lib/host/parser.mjs` — 多帧 zstd 解码 + JSONL 解析（Node 版解析器）
-- `lib/host/narrative.mjs` — 叙述转换层（摘要/故事线/事件树）
-- `lib/host/web.mjs` — 同源 API：`/dsh-session-viz/api/{meta,sessions,summary,story,tree,log,line}`
-- `lib/client.js` — 会话头部按钮 + 三层查看器
+- `src/host/*.ts` — **TypeScript 源码**（解析器/叙述转换/web 路由，类型化重构）
+- `lib/host/index.mjs` / `lib/host/web.mjs` — tsdown 构建产物（web.mjs 内联 parser+narrative）
+- `lib/client.js` — 会话头部按钮 + 三层查看器（浏览器半，保持零构建）
+- `tsdown.config.ts` / `tsconfig.json` — TS 构建链
 - `cordis.patch.yml` — bundle 补丁（host 两半：主半 + web 半）
+
+开发：`pnpm install` → `pnpm typecheck` → `pnpm build`（tsdown → lib/，含产物校验）。
 
 ## 独立 Web 模式（可选）
 
