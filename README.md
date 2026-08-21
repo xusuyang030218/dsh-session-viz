@@ -47,6 +47,18 @@
 - 右侧默认显示会话概览卡片（改动 4）
 - 按事件类型定制预览：工具→文件名、结果→行数、todo→状态统计（改动 5）
 
+**可视化优化落实**（VISUALIZATION_OPTIMIZATION.md）：
+- 侧边栏与主区之间新增品牌色箭头指示器，点击可折叠/展开侧边栏
+- 概览页改为 4 个 KPI 卡片 + ECharts 环形图（事件类型分布）+ 横向条形图（分组统计，点击跳转搜索筛选）
+- 时间线改为纯 SVG 树形图（Turn → Step → 合并事件组，贝塞尔连线，悬停高亮路径，折叠节点不渲染子 DOM）
+- 工具流程改为 SVG 网络流程图（节点按耗时定大小、按工具类型着色、箭头表示调用顺序、点击弹详情）
+- 推理过程改为 ECharts 面积图（字符/秒节奏）+ 可折叠文本
+- 任务清单改为 SVG 三列状态流程图（pending → in_progress → completed，虚线表示状态流转）
+- 审批流程改为 SVG 垂直时间线（✓/✕ 节点，间距按等待时长）
+- Token 统计改为 ECharts 环形图 + 堆叠面积图（趋势可视化）
+- 事件搜索每条结果前增加类型色块（14 组配色）
+- ECharts 已本地化到 `static/vendor/echarts.min.js`（离线可用），加载失败时自动回退 CSS 条形图
+
 安装（web profile）：
 
 ```bash
@@ -100,6 +112,7 @@ dsh-session-viz/
 ├── REQUIREMENTS.md        # 需求文档（数据格式 + 14 组配色 + F1-F10）
 ├── UI_IMPROVEMENT.md      # UI 改版意见（6 项改动：树形/下拉/时间戳/概览/预览/合并）
 ├── PRODUCT_REDESIGN.md    # 产品重新定位（三层渐进式：摘要→故事线→技术详情）
+├── VISUALIZATION_OPTIMIZATION.md  # 可视化优化方案（ECharts + SVG 图表化改造）
 ├── analyze.py             # 数据分析脚本（既有）
 ├── app.py                 # FastAPI 后端（独立 Web 模式）
 ├── package.json           # DSH 插件清单（dsh.bundle + dsh.client）

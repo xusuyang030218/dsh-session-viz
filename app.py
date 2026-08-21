@@ -150,6 +150,7 @@ def _model_summary(model) -> dict:
         "groupCounts": model.groupCounts,
         "tokenTotals": model.tokenTotals,
         "turnCount": len(model.turns),
+        "stepTotal": sum(len(t.get("steps", [])) for t in model.turns),
         "toolCount": len(model.tools),
         "toolErrorCount": sum(1 for t in model.tools if t["status"] == "error"),
         "reasoningCount": len(model.reasoning),
