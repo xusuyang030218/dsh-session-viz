@@ -19,6 +19,24 @@
 | 第二层 | 📖 故事线 | 管理者 | 叙事式时间线：人类语言描述（「📖 AI 读取了 REQUIREMENTS.md」「⚠️ 请求审批 → ✅ 已批准」），推理折叠为摘要，点击展开 |
 | 第三层 | 🔬 事件树 | 开发者 | turn → step → 合并事件组 树形结构，按 14 组配色着色，搜索框 + 分组类型下拉，毫秒级/相对时间，**右侧事件详情（请求参数 JSON / 返回值 / 错误 / meta / 原始行）** |
 
+此外还提供一个独立的会话视图标签页：
+
+| 标签页 | 视图 | 内容 |
+|--------|------|------|
+| 会话图 | 🗺 Session Map | Three.js 3D 主执行线 + 子 Agent 分叉汇回 + 固定时间概览尺 + 节点检查器（融合 [dsh-seelog](https://github.com/lhwu1/dsh-seelog)） |
+
+### JSON 查看器（可折叠树）
+
+事件详情的 **JSON** 标签页不再是压缩单行，而是一棵可交互的树：
+
+- **自动缩进**：原始 JSONL 是压缩单行，进入视图先 `parse` 再按 2 空格重新缩进（同一修复也作用于「解读」标签页里的 JSON 字段）
+- **缩进参考线 + 行号**：每层一条竖线，左侧行号栏可开关
+- **折叠/展开**：`▼/▶` 切换，折叠态显示 `{ 30 项 }` 摘要；深度 ≥2 或子项 >24 的容器**默认折叠**，首屏只给主干
+- **长字符串截断**：超过 220 字符先截断并标注字符数，点「展开」看全文
+- **工具栏**：全部展开 / 全部折叠 / 自动换行 / 行号 / 复制（复制的是缩进后的完整 JSON）+ 行数与字符数统计
+- **非法 JSON 兜底**：退回带语法高亮的纯文本，不丢信息
+- 语法着色随 DSH 深浅色主题自动切换
+
 **四层进度体系**（PROGRESS_AND_NAME.md）：
 | 进度条 | 位置 | 内容 |
 |--------|------|------|
@@ -146,6 +164,13 @@ dsh-session-viz/
 | `GET /dsh-session-viz/api/log?sessionId=&from=&to=&q=` | 会话日志分页事件（q=全文搜索） |
 | `GET /dsh-session-viz/api/line?sessionId=&line=` | 单行事件的完整解析 + 原始 JSON |
 
+会话图（`./map-web` 半，依赖 `webServer` + `sessionQuery`）：
+
+| 端点 | 说明 |
+|------|------|
+| `GET /dsh-session-viz/api/map/snapshot?sessionId=` | 谱系拓扑快照（主线 + 子 Agent 分叉，仅轻量语义字段） |
+| `GET /dsh-session-viz/api/map/event?sessionId=&seq=` | 按需读取单个事件及其前后各 2 条原始日志 |
+
 ## API
 
 | 端点 | 说明 |
@@ -165,8 +190,55 @@ dsh-session-viz/
 | `POST /api/sync` | 重新解码 zstd 源 |
 | `GET /api/meta` | 14 组配色与分组顺序（前端主题） |
 
+## 构建与架构
+
+host 半与 client 半现在都由 tsdown 构建：
+
+| 产物 | 来源 | 说明 |
+|------|------|------|
+| `lib/host/index.mjs` | `src/host/index.ts` | 主 host 半 |
+| `lib/host/web.mjs` | `src/host/web.ts` | AgentTrace 数据路由（`/dsh-session-viz/api/*`） |
+| `lib/host/map-web.mjs` | `src/host/map-web.ts` | 会话图快照路由（`/dsh-session-viz/api/map/*`） |
+| `lib/client.js` | `src/client/index.ts` | 单一浏览器 bundle：AgentTrace 查看器 + 3D 会话图（约 1.35 MB，Three.js 已内联） |
+
+client 半原为**零构建手写 JS**；融合会话图（TSX + Three.js）后改为构建产出单一
+bundle——`dsh.client` 只能声明一个 `./client` 入口，两个视图必须合并到同一个
+`window.__ModuleLoader__.load` 包装里。手写查看器原样保留在
+`src/client/legacy-viewer.js` 参与打包，未做大规模重写。
+
+`react` / `react-dom` / `@deepseek-ai/*` 一律标记 external，由 DSH 运行时注入；
+`three` 内联进产物。`lib/` 下还存放 Python 版查看器的 `*.py`，因此两个构建配置
+都必须 `clean: false`（`scripts/verify-build.mjs` 会校验它们没被清理掉）。
+
+类型方面，本仓库不导入 `@deepseek-ai` 的类型，而是在 `src/harness-shims.d.ts`
+中声明与其契约一致的最小接口，因此 `typecheck` 不依赖本地安装 harness 包，在任何
+机器上都能干净通过。
+
+```bash
+pnpm install
+pnpm run typecheck   # 0 error
+pnpm run test        # vitest：会话图模型/语义单测
+pnpm run build       # tsdown + verify-build 契约校验
+```
+
+> 安装时如果 pnpm 试图从 registry 拉 `@deepseek-ai/*` peer 并报 404，
+> 说明 `auto-install-peers` 被打开了：这些 peer 由 harness 注入，仓库已通过
+> `.npmrc` 与 `peerDependenciesMeta.optional` 关闭自动安装。
+
 ## 测试
 
 ```bash
-python run_tests.py
+pnpm run test        # vitest（会话图）
+python run_tests.py  # Python 解析器测试
 ```
+
+## 许可
+
+本仓库以 **Apache-2.0** 分发。
+
+「会话图」视图融合自 [lhwu1/dsh-seelog](https://github.com/lhwu1/dsh-seelog)
+（**MIT License**），涉及文件：`src/client/{FlowScene.tsx,SessionMapView.tsx,model.ts,semantic.ts,styles.ts}`、
+`src/shared/flow.ts`、`src/host/map-web.ts`、`tests/{model,semantic}.spec.ts`——
+均在文件头保留了 MIT 署名，完整许可文本见
+[LICENSE.dsh-seelog.MIT](LICENSE.dsh-seelog.MIT)。Three.js 以 MIT 许可随客户端
+bundle 分发。

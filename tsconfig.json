@@ -4,6 +4,7 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx",
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "skipLibCheck": true,
@@ -17,5 +18,5 @@
       "D:/nodejs/node_global/node_modules/@deepseek-ai/dsh/node_modules/@types"
     ]
   },
-  "include": ["src"]
+  "include": ["src", "tests"]
 }

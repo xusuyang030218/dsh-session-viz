@@ -1,12 +1,13 @@
 {
   "name": "dsh-session-viz",
-  "version": "1.0.0",
-  "description": "AgentTrace 智能体轨迹：DSH 会话日志可视化插件——三层渐进式查看器（摘要/故事线/事件树）+ 四层进度体系。host 半 TypeScript（tsdown 构建），随 harness 启动。",
+  "version": "1.1.0",
+  "description": "AgentTrace 智能体轨迹：DSH 会话日志可视化插件——三层渐进式查看器（摘要/故事线/事件树）+ 四层进度体系 + 可折叠 JSON 查看器 + 3D 会话图（主执行线/子 Agent 分叉/时间概览尺，融合 dsh-seelog）。host 与 client 半均由 tsdown 构建，随 harness 启动。",
   "type": "module",
   "main": "lib/host/index.mjs",
   "exports": {
     ".": "./lib/host/index.mjs",
     "./web": "./lib/host/web.mjs",
+    "./map-web": "./lib/host/map-web.mjs",
     "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
@@ -18,20 +19,41 @@
       "platform": "web",
       "inject": [
         "@deepseek-ai/dsh-client-runtime",
-        "@deepseek-ai/dsh-client-ui-slots"
+        "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
       ]
     }
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
+    "@deepseek-ai/dsh-client-locale": "*",
     "@deepseek-ai/dsh-client-runtime": "*",
+    "@deepseek-ai/dsh-client-ui-conversation": "*",
     "@deepseek-ai/dsh-client-ui-slots": "*",
-    "@deepseek-ai/dsh-host-webserver": "*"
+    "@deepseek-ai/dsh-host-webserver": "*",
+    "@deepseek-ai/dsh-session": "*",
+    "@deepseek-ai/dsh-session-query": "*",
+    "@deepseek-ai/schemastery": "*",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": { "optional": true },
+    "@deepseek-ai/dsh-client-locale": { "optional": true },
+    "@deepseek-ai/dsh-client-runtime": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-conversation": { "optional": true },
+    "@deepseek-ai/dsh-client-ui-slots": { "optional": true },
+    "@deepseek-ai/dsh-host-webserver": { "optional": true },
+    "@deepseek-ai/dsh-session": { "optional": true },
+    "@deepseek-ai/dsh-session-query": { "optional": true },
+    "@deepseek-ai/schemastery": { "optional": true },
+    "react": { "optional": true }
   },
   "files": [
     "lib",
     "cordis.patch.yml",
-    "README.md"
+    "README.md",
+    "LICENSE.dsh-seelog.MIT"
   ],
   "keywords": [
     "dsh",
@@ -41,18 +63,27 @@
     "log",
     "visualizer",
     "timeline",
-    "jsonl"
+    "jsonl",
+    "session-map",
+    "threejs"
   ],
   "scripts": {
     "build": "pnpm exec tsdown -c tsdown.config.ts && node scripts/verify-build.mjs",
     "typecheck": "pnpm exec tsc --noEmit -p tsconfig.json",
-    "test": "node run_tests.py"
+    "test": "pnpm exec vitest run",
+    "test:py": "node run_tests.py",
+    "validate": "pnpm run test && pnpm run build"
   },
   "license": "Apache-2.0",
   "packageManager": "pnpm@9.15.0+sha512.76e2379760a4328ec4415815bcd6628dee727af3779aaa4c914e3944156c4299921a89f976381ee107d41f12cfa4b66681ca9c718f0668fa0831ed4c6d8ba56c",
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "@types/react": "~18.3.0",
+    "@types/three": "^0.180.0",
+    "react": "^18.3.0",
+    "three": "^0.180.0",
     "tsdown": "^0.22.14",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "vitest": "^3.2.0"
   }
 }
