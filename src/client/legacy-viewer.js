@@ -35,6 +35,14 @@ import { createPortal } from 'react-dom'
       listeners.forEach((fn) => fn())
     }
 
+    // ===== 额外视图注册（供 index.ts 注入「会话图」等 TSX 视图）=====
+    // 保持本文件零构建手写 JS 的定位：外部视图通过 render(sessionId) 回调注入，
+    // 本文件不直接依赖任何 TSX 模块。
+    let extraModes = []
+    function registerExtraMode(mode) {
+      extraModes.push(mode)
+    }
+
     // ===== 内联 CSS（v2） =====
     const CSS_TEXT = `
 .dsvz-ov{position:fixed;inset:0;z-index:9999;background:rgba(8,10,14,.55);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;font-family:var(--dsw-font-family,-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif)}
@@ -261,6 +269,53 @@ body[data-ds-dark-theme] .dsvz-header-btn.active{border-color:#5690fe;color:#569
 .dsvz-stepprog .sp-bar .tl{flex:1;height:8px;border-radius:4px;min-width:2px}
 .dsvz-stepprog .sp-bar .ct{width:44px;text-align:right;font-family:var(--dsw-font-mono,Consolas,monospace);color:var(--dsw-alias-label-secondary,#8493ab);flex-shrink:0}
 .dsvz-stepprog .sp-foot{margin-top:6px;font-size:11px;color:var(--dsw-alias-label-secondary,#8493ab);display:flex;gap:12px}
+
+/* ===== 首页：会话过程闭环总览 ===== */
+.dsvz-home{display:flex;flex-direction:column;gap:18px;padding:4px 2px 24px}
+.dsvz-home-hero{padding:16px 18px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.14));border-radius:14px;background:linear-gradient(135deg,rgba(37,99,235,.05),rgba(34,197,94,.04))}
+.dsvz-home-title{font-size:20px;font-weight:800;margin-bottom:6px}
+.dsvz-home-sub{font-size:12.5px;line-height:1.7;color:var(--dsw-alias-label-secondary,#8493ab);max-width:720px}
+.dsvz-home-legend{display:flex;gap:16px;margin-top:12px;flex-wrap:wrap}
+.dsvz-legend-item{display:inline-flex;align-items:center;gap:6px;font-size:11.5px;color:var(--dsw-alias-label-secondary,#8493ab)}
+.dsvz-legend-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+.dsvz-home-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+.dsvz-home-card{display:flex;flex-direction:column;gap:8px;padding:14px 16px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.16));border-radius:12px;background:var(--dsw-alias-surface-subtle,rgba(128,128,128,.03))}
+.dsvz-home-card-icon{font-size:20px}
+.dsvz-home-card-label{font-size:12px;color:var(--dsw-alias-label-secondary,#8493ab)}
+.dsvz-home-card-num{font-size:26px;font-weight:800;line-height:1}
+.dsvz-home-card-stats{display:flex;gap:10px;font-size:11.5px;font-family:var(--dsw-font-mono,Consolas,monospace)}
+.dsvz-stat-ok{color:#16a34a}
+.dsvz-stat-open{color:#d97706}
+.dsvz-stat-err{color:#dc2626}
+.dsvz-home-unclosed{border:1px dashed rgba(217,119,6,.5);border-radius:12px;padding:12px 16px;background:rgba(217,119,6,.05)}
+.dsvz-home-unclosed-title{font-size:13px;font-weight:700;color:#d97706;margin-bottom:8px}
+.dsvz-home-unclosed-list{display:flex;flex-direction:column;gap:7px}
+.dsvz-home-unclosed-item{display:flex;align-items:center;gap:8px;font-size:12.5px}
+.dsvz-home-unclosed-label{font-weight:600}
+.dsvz-home-unclosed-sub{color:var(--dsw-alias-label-secondary,#8493ab);font-size:11.5px}
+.dsvz-home-jump{margin-left:auto;font-size:11px!important;padding:3px 10px!important}
+.dsvz-home-rings{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:16px}
+.dsvz-ring-turn{display:flex;flex-direction:column;align-items:center;gap:6px;padding:10px;border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.14));border-radius:12px;background:var(--dsw-alias-surface-subtle,rgba(128,128,128,.03));transition:border-color .15s,transform .15s}
+.dsvz-ring-turn:hover{border-color:var(--dsw-alias-brand-primary-new-colorprimary-new-color,#2563eb);transform:translateY(-1px)}
+.dsvz-ring-turn svg{flex-shrink:0}
+.dsvz-ring-meta{display:flex;align-items:center;gap:8px;font-size:12px;width:100%;justify-content:center}
+.dsvz-ring-label{font-weight:700}
+.dsvz-ring-status{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid}
+.dsvz-ring-dur{font-size:10.5px;color:var(--dsw-alias-label-secondary,#8493ab);font-family:var(--dsw-font-mono,Consolas,monospace)}
+.dsvz-ring-steps{width:100%;display:flex;flex-direction:column;gap:4px;margin-top:2px;max-height:220px;overflow:auto}
+.dsvz-ring-step{display:flex;align-items:center;gap:7px;font-size:11.5px;padding:5px 8px;border-left:3px solid;border-radius:6px;background:var(--dsw-specific-input-major,#fff);cursor:pointer}
+.dsvz-ring-step:hover{background:rgba(37,99,235,.06)}
+.dsvz-ring-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dsvz-ring-step-label{font-weight:600;white-space:nowrap}
+.dsvz-ring-step-tools{display:flex;gap:4px;flex-wrap:wrap;min-width:0}
+.dsvz-ring-tool{font-size:10px;padding:1px 6px;border-radius:999px;border:1px solid rgba(128,128,128,.25);color:var(--dsw-alias-label-secondary,#8493ab);white-space:nowrap;max-width:120px;overflow:hidden;text-overflow:ellipsis}
+.dsvz-ring-tool.err{border-color:#ef4444;color:#dc2626;background:rgba(239,68,68,.06)}
+.dsvz-ring-tool.open{border-color:#f59e0b;color:#d97706;background:rgba(245,158,11,.08);animation:dsvz-pulse 1.6s ease-in-out infinite}
+.dsvz-ring-more{font-size:10px;color:var(--dsw-alias-label-secondary,#8493ab)}
+.dsvz-home-actions{display:flex;gap:10px;flex-wrap:wrap}
+.dsvz-home-btn{font-size:12.5px!important;padding:7px 16px!important}
+@keyframes dsvz-pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
 
 /* ===== JSON 查看器（可折叠树 + 缩进参考线 + 行号 + 长串折行） ===== */
 .dsvz-json{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.18));border-radius:10px;background:rgba(128,128,128,.04);overflow:hidden;margin:0 0 12px;display:flex;flex-direction:column;min-height:0}
@@ -874,6 +929,154 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
       return React.createElement('div', { className: 'dsvz-empty', style: { padding: '8px 0' } }, '无变更内容')
     }
 
+    // ===== 首页：会话过程闭环总览 =====
+    // 每个「环」= 一个开始/结束配对（turn / step / tool / approval）。
+    // 闭合环 = 绿色实线；未闭合环 = 琥珀色虚线 + 脉冲动画（会话进行中/异常中断）；
+    // 失败环 = 红色。点击环 → 跳到事件树对应 turn/step。
+    function HomeView({ closure, meta, turns, onJump, onOpenTree, onOpenSummary, onOpenMap }) {
+      const [expandTurn, setExpandTurn] = React.useState(null) // 展开的 turn 序号（null=全部折叠为概览）
+      if (!closure) return React.createElement('div', { className: 'dsvz-empty' }, '加载中…')
+      const s = closure.summary
+      const cards = [
+        { k: 'turn', icon: '🔄', label: '对话轮次', total: s.turn.total, closed: s.turn.closed, open: s.turn.open, error: s.turn.error },
+        { k: 'step', icon: '🪜', label: '执行步骤', total: s.step.total, closed: s.step.closed, open: s.step.open, error: s.step.error },
+        { k: 'tool', icon: '🧰', label: '工具调用', total: s.tool.total, closed: s.tool.closed, open: s.tool.open, error: s.tool.error },
+        { k: 'approval', icon: '🛡️', label: '审批', total: s.approval.total, closed: s.approval.closed, open: s.approval.open, error: s.approval.error },
+      ]
+      // 环的圆环几何：内层 = 该层 children 的占比环
+      function ringArc(ring, radius) {
+        // 返回若干圆弧段：每一段是 [startFrac, endFrac, status]
+        const segs = []
+        const kids = ring.children || []
+        if (!kids.length) {
+          segs.push([0, 1, ring.status])
+          return segs
+        }
+        // 每个 child 按权重分一段（权重=耗时或 1）
+        const weights = kids.map((c) => Math.max(1, c.durationMs ?? 1))
+        const totalW = weights.reduce((a, b) => a + b, 0)
+        let acc = 0
+        kids.forEach((c, i) => {
+          const w = weights[i] / totalW
+          segs.push([acc, acc + w, c.status])
+          acc += w
+        })
+        return segs
+      }
+      // SVG 弧线 path：从 start 到 end（占比 0..1，0=12 点方向，顺时针）
+      function arcPath(frac0, frac1, radius) {
+        const a0 = -Math.PI / 2 + frac0 * Math.PI * 2
+        const a1 = -Math.PI / 2 + frac1 * Math.PI * 2
+        const cx = 0, cy = 0
+        const x0 = cx + radius * Math.cos(a0), y0 = cy + radius * Math.sin(a0)
+        const x1 = cx + radius * Math.cos(a1), y1 = cy + radius * Math.sin(a1)
+        const large = (frac1 - frac0) > 0.5 ? 1 : 0
+        return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${radius} ${radius} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`
+      }
+      const colorOf = (status) => status === 'closed' ? '#22c55e' : status === 'open' ? '#f59e0b' : '#ef4444'
+      const dashOf = (status) => status === 'open' ? '4 3' : null
+
+      // 单个 turn 的环（大圆 + 内层 step 环）
+      function TurnRing({ ring }) {
+        const expanded = expandTurn === ring.turn
+        const R = 64
+        const kids = ring.children || []
+        const stepSegs = kids.map((st) => ringArc(st, R - 14)).flat()
+        // 外层 turn 环
+        const outer = ringArc(ring, R)
+        return React.createElement('div', {
+          className: 'dsvz-ring-turn' + (expanded ? ' expanded' : ''),
+          style: { cursor: 'pointer' },
+          onClick: (e) => { e.stopPropagation(); setExpandTurn(expanded ? null : ring.turn) },
+          title: `${ring.label}${ring.durationMs != null ? ` · ${fmtDur(ring.durationMs)}` : ''}`,
+        },
+          React.createElement('svg', { viewBox: '-80 -80 160 160', width: 160, height: 160 },
+            outer.map((seg, i) => React.createElement('circle', {
+              key: i, cx: 0, cy: 0, r: R, fill: 'none',
+              stroke: colorOf(seg[2]), strokeWidth: 6,
+              strokeDasharray: dashOf(seg[2]) ?? undefined,
+              strokeLinecap: 'round',
+              // 画弧段：用 dashoffset 技巧不可靠，改用 path
+            })),
+            // 简化：整环颜色 = 该 turn 状态；内层 step 环分段
+            React.createElement('circle', { cx: 0, cy: 0, r: R, fill: 'none', stroke: colorOf(ring.status), strokeWidth: 7, strokeDasharray: dashOf(ring.status) ?? undefined, strokeLinecap: 'round' }),
+            React.createElement('circle', { cx: 0, cy: 0, r: R - 14, fill: 'none', stroke: 'rgba(128,128,128,.18)', strokeWidth: 1 }),
+            stepSegs.map((seg, i) => React.createElement('path', { key: i, d: arcPath(seg[0], seg[1], R - 14), fill: 'none', stroke: colorOf(seg[2]), strokeWidth: 4, strokeDasharray: dashOf(seg[2]) ?? undefined, strokeLinecap: 'butt' })),
+            React.createElement('text', { x: 0, y: -6, textAnchor: 'middle', fontSize: 15, fontWeight: 800, fill: 'var(--dsw-alias-label-primary,#1e293b)' }, `T${ring.turn}`),
+            React.createElement('text', { x: 0, y: 12, textAnchor: 'middle', fontSize: 9.5, fill: 'var(--dsw-alias-label-secondary,#8493ab)' }, `${kids.length} 步`),
+          ),
+          React.createElement('div', { className: 'dsvz-ring-meta' },
+            React.createElement('span', { className: 'dsvz-ring-label' }, ring.label),
+            React.createElement('span', { className: 'dsvz-ring-status' }, ring.status === 'closed' ? '✓ 闭合' : ring.status === 'open' ? '◌ 进行中' : '✕ 失败'),
+            ring.durationMs != null && React.createElement('span', { className: 'dsvz-ring-dur' }, fmtDur(ring.durationMs)),
+          ),
+          expanded && React.createElement('div', { className: 'dsvz-ring-steps' },
+            kids.map((st, i) => React.createElement('div', {
+              key: i, className: 'dsvz-ring-step', style: { borderLeftColor: colorOf(st.status) },
+              onClick: (e) => { e.stopPropagation(); onJump && onJump(st) },
+              title: `跳到第 ${st.turn} 轮·第 ${st.step} 步`,
+            },
+              React.createElement('span', { className: 'dsvz-ring-dot', style: { background: colorOf(st.status) } }, st.status === 'open' ? '◌' : ''),
+              React.createElement('span', { className: 'dsvz-ring-step-label' }, st.label),
+              React.createElement('span', { className: 'dsvz-ring-step-tools' },
+                st.children.filter((c) => c.kind === 'tool').slice(0, 6).map((c, j) =>
+                  React.createElement('span', { key: j, className: 'dsvz-ring-tool' + (c.status === 'error' ? ' err' : c.status === 'open' ? ' open' : ''), title: `${c.label}${c.durationMs != null ? ' · ' + fmtDur(c.durationMs) : ''}${c.status === 'error' ? ' · 失败' : c.status === 'open' ? ' · 进行中' : ''}` }, c.label)),
+                st.children.filter((c) => c.kind === 'tool').length > 6 && React.createElement('span', { className: 'dsvz-ring-more' }, `+${st.children.filter((c) => c.kind === 'tool').length - 6}`),
+              ),
+              st.durationMs != null && React.createElement('span', { className: 'dsvz-ring-dur' }, fmtDur(st.durationMs)),
+            )),
+          ),
+        )
+      }
+
+      return React.createElement('div', { className: 'dsvz-scroll' },
+        React.createElement('div', { className: 'dsvz-home' },
+          React.createElement('div', { className: 'dsvz-home-hero' },
+            React.createElement('div', { className: 'dsvz-home-title' }, '会话过程'),
+            React.createElement('div', { className: 'dsvz-home-sub' }, '把整个会话拆成一圈圈「环」：每一轮、每一步、每一次工具调用、每一次审批，都有开始与结束。闭合的环是已完成的工作，未闭合的环是正在进行或中断的工作。'),
+            React.createElement('div', { className: 'dsvz-home-legend' },
+              React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#22c55e' } }), '闭合'),
+              React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#f59e0b' } }), '进行中'),
+              React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#ef4444' } }), '失败'),
+            ),
+          ),
+          React.createElement('div', { className: 'dsvz-home-cards' },
+            cards.map((c) => React.createElement('div', { key: c.k, className: 'dsvz-home-card' },
+              React.createElement('div', { className: 'dsvz-home-card-icon' }, c.icon),
+              React.createElement('div', { className: 'dsvz-home-card-body' },
+                React.createElement('div', { className: 'dsvz-home-card-label' }, c.label),
+                React.createElement('div', { className: 'dsvz-home-card-num' }, fmtNum(c.total)),
+              ),
+              React.createElement('div', { className: 'dsvz-home-card-stats' },
+                React.createElement('span', { className: 'dsvz-stat-ok' }, `✓ ${fmtNum(c.closed)}`),
+                c.open > 0 && React.createElement('span', { className: 'dsvz-stat-open' }, `◌ ${fmtNum(c.open)}`),
+                c.error > 0 && React.createElement('span', { className: 'dsvz-stat-err' }, `✕ ${fmtNum(c.error)}`),
+              ),
+            )),
+          ),
+          s.unclosed && s.unclosed.length > 0 && React.createElement('div', { className: 'dsvz-home-unclosed' },
+            React.createElement('div', { className: 'dsvz-home-unclosed-title' }, '◌ 进行中的工作（未闭合）'),
+            React.createElement('div', { className: 'dsvz-home-unclosed-list' },
+              s.unclosed.map((r, i) => React.createElement('div', { key: i, className: 'dsvz-home-unclosed-item' },
+                React.createElement('span', { className: 'dsvz-ring-dot', style: { background: '#f59e0b' } }),
+                React.createElement('span', { className: 'dsvz-home-unclosed-label' }, r.kind === 'tool' ? `工具 ${r.label}` : r.label),
+                React.createElement('span', { className: 'dsvz-home-unclosed-sub' }, r.kind === 'turn' ? '本轮尚未结束' : r.kind === 'step' ? '本步尚未结束' : r.kind === 'approval' ? '等待审批结果' : '等待工具返回'),
+                r.turn != null && React.createElement('button', { className: 'dsvz-btn dsvz-home-jump', onClick: () => onJump && onJump(r) }, `跳到第 ${r.turn} 轮${r.step != null ? '·' + r.step + ' 步' : ''}`),
+              )),
+            ),
+          ),
+          React.createElement('div', { className: 'dsvz-home-rings' },
+            (closure.rings || []).map((ring) => React.createElement(TurnRing, { key: ring.id, ring })),
+          ),
+          React.createElement('div', { className: 'dsvz-home-actions' },
+            React.createElement('button', { className: 'dsvz-btn dsvz-home-btn', onClick: onOpenSummary }, '📋 查看执行摘要'),
+            React.createElement('button', { className: 'dsvz-btn dsvz-home-btn', onClick: onOpenTree }, '🔬 查看事件树'),
+            onOpenMap && React.createElement('button', { className: 'dsvz-btn dsvz-home-btn', onClick: onOpenMap }, '🗺 打开会话图'),
+          ),
+        ),
+      )
+    }
+
     // ===== 第一层：执行摘要 =====
     function SummaryView({ summary, onStory, onTree, onSelectFile, devMode, turns, onPos }) {
       const [openFiles, setOpenFiles] = React.useState(new Set())
@@ -1055,14 +1258,19 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
         }
       }, [turns])
 
-      // 外部跳转信号（全局进度条点击）→ 展开目标 Turn 并滚动
+      // 外部跳转信号（全局进度条点击 / 首页环点击）→ 展开目标 Turn/Step 并滚动
       React.useEffect(() => {
         if (!jumpSignal || !turns?.length) return
         const target = jumpSignal.turn
         setOpenTurns((prev) => { const n = new Set(prev); n.add(target); return n })
-        // 滚动到目标 turn
+        if (jumpSignal.step != null) {
+          setOpenSteps((prev) => { const n = new Set(prev); n.add(`${target}-${jumpSignal.step}`); return n })
+        }
+        // 滚动到目标 turn（有 step 则滚动到 step）
         setTimeout(() => {
-          const el = document.querySelector(`[data-turn-head="${target}"]`)
+          const el = jumpSignal.step != null
+            ? document.querySelector(`[data-step-head="${target}-${jumpSignal.step}"]`)
+            : document.querySelector(`[data-turn-head="${target}"]`)
           if (el) el.scrollIntoView({ block: 'nearest' })
         }, 50)
       }, [jumpSignal, turns])
@@ -1239,12 +1447,13 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
     function Viewer({ sessionId: initialSessionId, groups, onClose }) {
       const [sessionId, setSessionId] = React.useState(initialSessionId)
       const [sessions, setSessions] = React.useState([])
-      const [mode, setMode] = React.useState('summary')
+      const [mode, setMode] = React.useState('home')
       const [, setTick] = React.useState(0)
       const [meta, setMeta] = React.useState(null)
       const [summary, setSummary] = React.useState(null)
       const [story, setStory] = React.useState(null)
       const [tree, setTree] = React.useState(null)
+      const [closure, setClosure] = React.useState(null)
       const [typeCounts, setTypeCounts] = React.useState(null)
       const [err, setErr] = React.useState(null)
       const [loading, setLoading] = React.useState(false)
@@ -1260,12 +1469,12 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
       const loadSession = React.useCallback(async (sid) => {
         if (!sid) return
         setLoading(true); setErr(null)
-        setSummary(null); setStory(null); setTree(null); setSelected(null); setSelectedLine(null)
+        setSummary(null); setStory(null); setTree(null); setClosure(null); setSelected(null); setSelectedLine(null)
         try {
           // 分阶段加载 → 展示加载进度
           setLoadStage('meta')
           const metaRes = await fetch(`/dsh-session-viz/api/tree?sessionId=${encodeURIComponent(sid)}`).then((r) => r.json())
-          setTree(metaRes.turns); setMeta(metaRes.meta); setTypeCounts(metaRes.typeCounts)
+          setTree(metaRes.turns); setMeta(metaRes.meta); setTypeCounts(metaRes.typeCounts); setClosure(metaRes.closure ?? null)
           setLoadStage('summary')
           const s = await apiSummary(sid)
           setSummary(s.summary)
@@ -1345,12 +1554,30 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
             ),
           ),
           React.createElement('div', { className: 'dsvz-modes' },
+            modeTab('home', '🏠 首页'),
             modeTab('summary', '📋 摘要'),
             modeTab('story', '📖 故事线'),
             devMode && modeTab('tree', '🔬 事件树'),
+            extraModes.map((em) => modeTab(em.id, em.label)),
           ),
           err && React.createElement('div', { className: 'dsvz-load', style: { color: '#dc2626' } }, `错误：${esc(err)}`),
           loading && !summary && React.createElement(LoadingOverlay, { stage: loadStage }),
+          mode === 'home' && React.createElement(HomeView, {
+            closure,
+            meta,
+            turns: tree,
+            onJump: (ring) => {
+              // 跳到对应 turn（若为 step/tool 则也跳到 step）的事件树
+              if (!ring) return
+              setMode('tree')
+              setJumpSignal({ turn: ring.turn, step: ring.step ?? null, ts: Date.now() })
+              if (!devMode) devMode = true
+            },
+            onOpenSummary: () => setMode('summary'),
+            onOpenTree: () => { if (!devMode) devMode = true; setMode('tree') },
+            onOpenMap: extraModes.some((em) => em.id === 'map') ? () => setMode('map') : null,
+          }),
+          extraModes.map((em) => mode === em.id && em.render(sessionId)),
           mode === 'summary' && React.createElement(SummaryView, {
             summary,
             devMode,
@@ -1483,4 +1710,4 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
     }
 
 export const inject = ['slots']
-export { apply }
+export { apply, registerExtraMode }

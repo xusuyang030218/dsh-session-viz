@@ -9,7 +9,7 @@
 import { readdir, stat, readFile } from "node:fs/promises"
 import { join } from "node:path"
 import { GROUPS, GROUP_ORDER, decompressSessionLog, loadAndParseSession, parseLogText } from "./parser.js"
-import { buildStory, buildSummary, buildTree } from "./narrative.js"
+import { buildStory, buildSummary, buildTree, buildClosure } from "./narrative.js"
 
 export const name = "dsh-session-viz-web"
 export const inject = ["webServer"] as const
@@ -260,7 +260,8 @@ export function apply(ctx: CordisCtx, config: { sessionsPath?: string | null }):
           const entry = await getCached(sessionsPath, q.sessionId)
           const { lines, objs } = narrativeInput(entry)
           const tree = buildTree(lines, objs)
-          json(res, 200, { ok: true, meta: entry.parsed.meta, typeCounts: entry.parsed.typeCounts, turns: tree })
+          const closure = buildClosure(objs)
+          json(res, 200, { ok: true, meta: entry.parsed.meta, typeCounts: entry.parsed.typeCounts, turns: tree, closure })
           return
         }
 

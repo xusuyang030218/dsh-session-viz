@@ -45,7 +45,17 @@ try {
     ["export { Config, apply, inject, name }", "map-web 导出契约"],
     ["/dsh-session-viz/api/map/snapshot", "会话图快照路由"],
     ["/dsh-session-viz/api/map/event", "会话图事件路由"],
+    ["maxSessions", "map-web 配置契约缺失"],
   ]
+
+  // web.mjs 内含闭环模型：/api/tree 响应须携带 closure 字段
+  const webSrc = readFileSync(join(root, "lib/host/web.mjs"), "utf8")
+  const webChecks = [
+    ["closure", "web.mjs /api/tree 缺少 closure 字段"],
+  ]
+  for (const [needle, message] of webChecks) {
+    if (!webSrc.includes(needle)) throw new Error(`${message}（未找到 ${needle}）`)
+  }
   for (const [needle, message] of mapChecks) {
     if (!mapSrc.includes(needle)) throw new Error(`${message} 不满足（未找到 ${needle}）`)
   }
@@ -63,8 +73,11 @@ try {
     ['id: "dsh-session-viz"', "loader id 不是 dsh-session-viz"],
     ["return module.exports", "loader footer 缺失"],
     ["conversation.session.header.utilities", "AgentTrace 头部按钮注册缺失"],
-    ["conversation.view", "会话图标签页注册缺失"],
+    ["registerExtraMode", "会话图模式注册入口缺失"],
+    ["会话图", "会话图模式标签缺失"],
+    ["extraModes.map", "额外模式渲染循环缺失"],
     ["dsh-session-viz/api/map/snapshot", "会话图快照请求路径缺失"],
+    ["dsvz-home", "首页闭环总览视图缺失"],
   ]
   for (const [needle, message] of checks) {
     if (!client.includes(needle)) throw new Error(`${message}（未找到 ${needle}）`)

@@ -136,6 +136,229 @@ export interface TreeTurn {
 }
 
 // ---------------------------------------------------------------------------
+// 闭环模型（首页「会话过程」视图）
+// ---------------------------------------------------------------------------
+
+export type ClosureKind = "turn" | "step" | "tool" | "approval"
+export type ClosureStatus = "closed" | "open" | "error"
+
+/** 一个「环」：开始事件与结束事件配对；只有开始 = 未闭合（会话进行中/异常中断）。 */
+export interface ClosureRing {
+  id: string
+  kind: ClosureKind
+  label: string          // 中文短名：第 1 轮 / 第 2 步 / read / 审批
+  turn?: number
+  step?: number
+  status: ClosureStatus
+  openLine: number
+  closeLine?: number
+  openTime: number | null
+  closeTime?: number | null
+  durationMs?: number
+  detail?: string        // 工具名 / 错误码 / 审批结果
+  children: ClosureRing[]  // turn 内含 step；step 内含 tool/approval
+}
+
+/** 四类环的汇总统计。 */
+export interface ClosureSummary {
+  turn: { total: number; closed: number; open: number; error: number }
+  step: { total: number; closed: number; open: number; error: number }
+  tool: { total: number; closed: number; open: number; error: number }
+  approval: { total: number; closed: number; open: number; error: number }
+  unclosed: ClosureRing[]  // 所有未闭合的环（顶层视角，供首页「进行中」展示）
+}
+
+export interface ClosureModel {
+  rings: ClosureRing[]
+  summary: ClosureSummary
+}
+
+function ringLabel(kind: ClosureKind, d: Record<string, unknown>, fallback: string): string {
+  if (kind === "tool") return String(d.name ?? "工具")
+  if (kind === "approval") return "审批"
+  if (kind === "turn") return `第 ${String(d.turn ?? "?")} 轮`
+  return `第 ${String(d.turn ?? "?")} 轮·第 ${String(d.step ?? "?")} 步`
+}
+
+function ringDuration(openTime: number | null, closeTime: number | null | undefined): number | undefined {
+  if (openTime == null || closeTime == null) return undefined
+  return closeTime - openTime
+}
+
+/**
+ * 从原始事件序列构建闭环模型。
+ *
+ * 配对规则：
+ *   - turn/start ↔ turn/end        （无 end = 未闭合）
+ *   - step/start ↔ step/end        （无 end = 未闭合）
+ *   - tool/call ↔ tool/result      按 data.callId 配对；result 带 error = 失败
+ *   - approval/asked ↔ approval/decided  按出现顺序配对（approval 无稳定 id）
+ *   - turn/end 的 reason.kind === "error" 记为 error 环
+ *
+ * 嵌套：tool/approval 归入其所在 step 的 children，step 归入 turn 的 children。
+ */
+export function buildClosure(objs: Array<Record<string, unknown> | null>): ClosureModel {
+  const turns: ClosureRing[] = []
+  const stack: ClosureRing[] = []   // 当前 open 的 turn/step（用于归属 children）
+  const orphans: ClosureRing[] = [] // 无 turn 上下文时创建的环（如会话外的审批）
+  let curStepRing: ClosureRing | null = null
+  let curTurnRing: ClosureRing | null = null
+  const toolCalls = new Map<string, ClosureRing>()
+  const approvals: ClosureRing[] = []  // 按序 pending 的 approval
+
+  function pushToParent(ring: ClosureRing): void {
+    if (curStepRing) curStepRing.children.push(ring)
+    else if (curTurnRing) curTurnRing.children.push(ring)
+    else orphans.push(ring)
+  }
+
+  for (let i = 0; i < objs.length; i++) {
+    const o = objs[i]
+    if (!o) continue
+    const t = (o.type ?? "?") as string
+    const d = (o.data ?? {}) as Record<string, unknown>
+    const time = (o.time as number) ?? null
+
+    if (t === "turn/start") {
+      curTurnRing = {
+        id: `turn-${String(d.turn ?? i)}`,
+        kind: "turn",
+        label: ringLabel("turn", d, "轮"),
+        turn: d.turn as number,
+        status: "closed",
+        openLine: i,
+        openTime: time,
+        children: [],
+      }
+      turns.push(curTurnRing)
+      stack.push(curTurnRing)
+      curStepRing = null
+      continue
+    }
+    if (t === "turn/end") {
+      const reason = (d.reason ?? {}) as Record<string, unknown>
+      if (curTurnRing) {
+        curTurnRing.closeLine = i
+        curTurnRing.closeTime = time
+        curTurnRing.durationMs = ringDuration(curTurnRing.openTime, time)
+        curTurnRing.status = reason.kind === "error" ? "error" : "closed"
+        if (reason.kind === "error") curTurnRing.detail = String((reason.error as Record<string, unknown> | undefined)?.code ?? "error")
+      }
+      stack.pop()
+      const top = stack.length ? stack[stack.length - 1] : undefined
+      curTurnRing = top !== undefined && top.kind === "turn" ? top : null
+      curStepRing = top !== undefined && top.kind === "step" ? top : null
+      continue
+    }
+    if (t === "step/start") {
+      const ring: ClosureRing = {
+        id: `step-${String(d.turn ?? "?")}-${String(d.step ?? i)}`,
+        kind: "step",
+        label: ringLabel("step", d, "步"),
+        turn: d.turn as number,
+        step: d.step as number,
+        status: "closed",
+        openLine: i,
+        openTime: time,
+        children: [],
+      }
+      pushToParent(ring)
+      stack.push(ring)
+      curStepRing = ring
+      continue
+    }
+    if (t === "step/end") {
+      if (curStepRing) {
+        curStepRing.closeLine = i
+        curStepRing.closeTime = time
+        curStepRing.durationMs = ringDuration(curStepRing.openTime, time)
+      }
+      stack.pop()
+      const top = stack.length ? stack[stack.length - 1] : undefined
+      curStepRing = top !== undefined && top.kind === "step" ? top : null
+      continue
+    }
+    if (t === "tool/call") {
+      const callId = String(d.callId ?? `call-${i}`)
+      const ring: ClosureRing = {
+        id: `tool-${callId}`,
+        kind: "tool",
+        label: String(d.name ?? "工具"),
+        turn: (curTurnRing?.turn) ?? (d.turn as number | undefined),
+        step: curStepRing?.step,
+        status: "open",
+        openLine: i,
+        openTime: time,
+        detail: String(d.name ?? ""),
+        children: [],
+      }
+      toolCalls.set(callId, ring)
+      pushToParent(ring)
+      continue
+    }
+    if (t === "tool/result") {
+      const source = (d.message as Record<string, unknown> | undefined)?.source as Record<string, unknown> | undefined
+      const callId = String(source?.callId ?? d.callId ?? "")
+      const ring = toolCalls.get(callId)
+      if (ring) {
+        ring.closeLine = i
+        ring.closeTime = time
+        ring.durationMs = ringDuration(ring.openTime, time)
+        const hasError = d.error !== undefined
+        ring.status = hasError ? "error" : "closed"
+        if (hasError) ring.detail = String((d.error as Record<string, unknown> | undefined)?.code ?? "error")
+      }
+      continue
+    }
+    if (t === "approval/asked") {
+      const ring: ClosureRing = {
+        id: `approval-${i}`,
+        kind: "approval",
+        label: "审批",
+        turn: curTurnRing?.turn,
+        step: curStepRing?.step,
+        status: "open",
+        openLine: i,
+        openTime: time,
+        detail: String(d.toolName ?? ""),
+        children: [],
+      }
+      approvals.push(ring)
+      pushToParent(ring)
+      continue
+    }
+    if (t === "approval/decided") {
+      const ring = approvals.pop()
+      if (ring) {
+        ring.closeLine = i
+        ring.closeTime = time
+        ring.durationMs = ringDuration(ring.openTime, time)
+        const outcome = String(d.outcome ?? "")
+        ring.status = outcome === "denied" ? "error" : "closed"
+        ring.detail = outcome === "allowed-once" ? "允许一次" : outcome === "allowed-always" ? "始终允许" : outcome === "denied" ? "已拒绝" : outcome
+      }
+      continue
+    }
+  }
+
+  // 汇总
+  const counts = { turn: { total: 0, closed: 0, open: 0, error: 0 }, step: { total: 0, closed: 0, open: 0, error: 0 }, tool: { total: 0, closed: 0, open: 0, error: 0 }, approval: { total: 0, closed: 0, open: 0, error: 0 } }
+  const unclosed: ClosureRing[] = []
+  function countRing(r: ClosureRing): void {
+    const c = counts[r.kind]
+    c.total++
+    if (r.status === "closed") c.closed++
+    else if (r.status === "open") { c.open++; unclosed.push(r) }
+    else c.error++
+    r.children.forEach(countRing)
+  }
+  turns.forEach(countRing)
+  orphans.forEach(countRing)
+
+  return { rings: [...turns, ...orphans], summary: { ...counts, unclosed } }
+}
+
+// ---------------------------------------------------------------------------
 // 人类语言映射
 // ---------------------------------------------------------------------------
 
