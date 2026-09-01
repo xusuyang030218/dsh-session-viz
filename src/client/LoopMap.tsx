@@ -60,12 +60,15 @@ function fmt(ms: number): string {
 function TurnCard({
   ring,
   branches,
+  total,
   selectedId,
   onSelect,
   onTip,
 }: {
   readonly ring: TurnRing
   readonly branches: readonly BranchLoop[]
+  /** 会话总轮数（头部显示「第 N / M 轮」）。 */
+  readonly total: number
   readonly selectedId: string | null
   readonly onSelect: (node: FlowNode) => void
   readonly onTip: (tip: Tip | null) => void
@@ -77,6 +80,8 @@ function TurnCard({
   const branchCount = branches.length
   const height = Math.max(270, 150 + branchCount * branchGapY)
   const mainCy = height / 2
+  // 无子 Agent 时收紧卡片宽度，主环居中；有分叉环时右侧留出分叉区域
+  const svgWidth = branchCount > 0 ? branchBaseX + 130 : 330
 
   const running = ring.status === 'running'
   const bandRadius = R - 8
@@ -119,36 +124,59 @@ function TurnCard({
   }
 
   return (
-    <section className="seelogTurnCard">
+    <section className="seelogTurnCard" data-turn={ring.turn}>
       <header className="seelogTurnHead">
+        <span className="seelogTurnIndex">#{String(ring.turn)}</span>
         <span className="seelogTurnTitle">第 {String(ring.turn)} 轮</span>
+        {total > 1 && <span className="seelogTurnOf">/ 共 {String(total)} 轮</span>}
         <span className="seelogTurnChip" style={{ color: STATUS_COLOR[ring.status], borderColor: STATUS_COLOR[ring.status] }}>
           {STATUS_LABEL[ring.status]}
         </span>
-        <span className="seelogTurnMeta">{String(ring.steps.length)} 步</span>
+        <span className="seelogTurnMeta">{String(ring.steps.length)} 步 · {String(ring.nodes.length)} 事件</span>
         {ring.durationMs !== undefined && <span className="seelogTurnMeta">{fmt(ring.durationMs)}</span>}
       </header>
       <div className="seelogTurnBody">
         <svg
           className="seelogTurnSvg"
-          viewBox={`0 0 ${branchBaseX + 130} ${height}`}
+          viewBox={`0 0 ${svgWidth} ${height}`}
           role="img"
           aria-label={`第 ${String(ring.turn)} 轮闭环`}
         >
           {/* 主环轨道 */}
           <circle cx={mainCx} cy={mainCy} r={R} fill="rgba(255,255,255,0.02)" stroke="rgba(120,150,190,0.15)" strokeWidth={1} />
-          {/* 步骤弧段带 */}
-          {ring.steps.map((step, index) => (
-            <path
-              key={`arc-${index}`}
-              d={arcPath(bandRadius, step.angleFrom, step.angleTo)}
-              fill="none"
-              stroke={STATUS_COLOR[step.status]}
-              strokeWidth={11}
-              opacity={0.85}
-              className={step.status === 'running' ? 'seelogRunning' : undefined}
-            />
-          ))}
+          {/* 步骤弧段带 + 弧上步骤号 */}
+          {ring.steps.map((step, index) => {
+            const arc = arcPath(bandRadius, step.angleFrom, step.angleTo)
+            const span = Math.abs(step.angleTo - step.angleFrom)
+            const amid = (step.angleFrom + step.angleTo) / 2
+            const showStepLabel = step.step >= 0 && span > 0.2 && ring.steps.length <= 10
+            return (
+              <g key={`arc-${index}`}>
+                <path
+                  d={arc}
+                  fill="none"
+                  stroke={STATUS_COLOR[step.status]}
+                  strokeWidth={11}
+                  opacity={0.85}
+                  className={step.status === 'running' ? 'seelogRunning' : undefined}
+                />
+                {showStepLabel && (
+                  <text
+                    x={mainCx + bandRadius * Math.cos(amid)}
+                    y={mainCy + bandRadius * Math.sin(amid)}
+                    textAnchor="middle"
+                    dominantBaseline="central"
+                    fontSize={9.5}
+                    fontWeight={800}
+                    fill="#0d1823"
+                    style={{ pointerEvents: 'none', userSelect: 'none' }}
+                  >
+                    {step.step}
+                  </text>
+                )}
+              </g>
+            )
+          })}
           {/* 状态环 */}
           <circle
             cx={mainCx}
@@ -161,11 +189,11 @@ function TurnCard({
             className={running ? 'seelogRunning' : undefined}
           />
           {/* 中心：轮次摘要 */}
-          <text x={mainCx} y={mainCy - 6} textAnchor="middle" fontSize={14} fontWeight={800} fill="#e4eef8">
+          <text x={mainCx} y={mainCy - 9} textAnchor="middle" fontSize={17} fontWeight={800} fill="#e4eef8">
             第 {String(ring.turn)} 轮
           </text>
-          <text x={mainCx} y={mainCy + 12} textAnchor="middle" fontSize={10} fill="#91a7bc">
-            {String(ring.nodes.length)} 事件
+          <text x={mainCx} y={mainCy + 12} textAnchor="middle" fontSize={10.5} fill="#91a7bc">
+            {String(ring.steps.length)} 步 · {String(ring.nodes.length)} 事件
           </text>
           {/* 中文标签卡 + 引线 */}
           {labels.map((ringNode) => {
@@ -282,6 +310,7 @@ export function LoopMap({ snapshot, selectedId, onSelect }: Props) {
             key={`turn-${ring.turn}`}
             ring={ring}
             branches={branchesByTurn.get(ring.turn) ?? []}
+            total={layout.turns.length}
             selectedId={selectedId}
             onSelect={onSelect}
             onTip={(value) => {

@@ -37,6 +37,10 @@ export interface FlowSession {
   readonly capturedThroughSeq: number | null
   readonly omittedEvents: number
   readonly nodes: readonly FlowNode[]
+  /** dsh-rewind 就地回退次数（被撤回的节点不进入 nodes）。 */
+  readonly rewindCount?: number
+  /** 被回退撤回（不进入 nodes）的事件条数。 */
+  readonly withdrawnEventCount?: number
 }
 
 /** A complete, frozen graph derived from one root session and its descendants. */

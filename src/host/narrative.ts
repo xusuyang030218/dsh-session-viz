@@ -16,7 +16,28 @@
  *   6. 审批故事化：原因简化为人类可读文本
  */
 
-import { GROUPS, groupOf } from "./parser.js"
+import { GROUPS, groupOf, detectRewinds, type RewindMarker } from "./parser.js"
+
+// ---------------------------------------------------------------------------
+// 回退上下文（dsh-rewind）
+// ---------------------------------------------------------------------------
+
+/** 由 detectRewinds 推导、供各视图生成器使用的回退上下文。 */
+export interface RewindOpts {
+  /** 撤回区间内全部事件 seq（不参与有效执行统计）。 */
+  withdrawn: Set<number>
+  /** 回退标记 + 幽灵步骤框架的 seq（内部机制，不展示）。 */
+  noiseSeqs: Set<number>
+  /** 回退标记事件自身的 seq。 */
+  markerSeqs: Set<number>
+  markers: RewindMarker[]
+}
+
+/** 从原始事件推导回退上下文（各视图生成器可直接调用，web 半会预计算传入）。 */
+export function rewindOptsOf(objs: Array<Record<string, unknown> | null>): RewindOpts {
+  const { markers, markerSeqs, noiseSeqs, withdrawnSeqs } = detectRewinds(objs)
+  return { withdrawn: withdrawnSeqs, noiseSeqs, markerSeqs, markers }
+}
 
 // ---------------------------------------------------------------------------
 // 类型定义
@@ -36,6 +57,21 @@ export interface FileChange {
   newString?: string
   /** 变更是否完整可见（edit 的 old/new 完整，write 的内容可能很长） */
   preview?: string
+  /** 该变更位于某次回退的撤回区间内（已不生效，可能已被还原）。 */
+  withdrawn?: boolean
+}
+
+/** 摘要层的一次回退条目：回退到哪条消息、撤回多少事件。 */
+export interface RewindSummary {
+  markerSeq: number | null
+  targetSeq: number | null
+  time: number | null
+  turn: number | null
+  /** 目标用户消息文本预览（回退后输入框回填的那条）。 */
+  targetPreview: string | null
+  /** 撤回区间 [targetSeq, markerSeq) 内全部事件条数。 */
+  withdrawnCount: number
+  sourceEventSeqs: number[]
 }
 
 export interface SummaryData {
@@ -53,9 +89,17 @@ export interface SummaryData {
   tokens: { inputTokens: number; outputTokens: number; cacheReadTokens: number; reasoningTokens: number }
   eventCount: number
   openApprovals: number
+  /** dsh-rewind 就地回退次数。 */
+  rewindCount: number
+  /** 被回退撤回（不再生效）的事件条数。 */
+  withdrawnCount: number
+  /** 回退详情（目标消息、撤回数量）。 */
+  rewinds: RewindSummary[]
+  /** 位于回退撤回区间内的文件变更（已不生效）。 */
+  rewoundFiles: FileChange[]
 }
 
-export type StoryNodeKind = "user" | "reasoning" | "tool" | "assistant" | "approval"
+export type StoryNodeKind = "user" | "reasoning" | "tool" | "assistant" | "approval" | "rewind"
 
 export interface StoryNode {
   kind: StoryNodeKind
@@ -73,6 +117,8 @@ export interface StoryNode {
   toolName?: string
   outcome?: string
   outcomeHuman?: string
+  /** 该节点位于某次回退的撤回区间内（已不生效），界面降权展示。 */
+  withdrawn?: boolean
 }
 
 export interface StoryTurn {
@@ -95,6 +141,8 @@ export interface TreeEvent {
   human?: string
   toolName?: string
   outcome?: string
+  /** 该事件被 dsh-rewind 回退撤回（已不生效），界面降权展示。 */
+  withdrawn?: boolean
 }
 
 export interface TreeGroup {
@@ -122,6 +170,8 @@ export interface TreeStep {
   eventCount: number
   groups: TreeGroup[]
   tools: string[]
+  /** 本步内被回退撤回的事件条数。 */
+  withdrawnCount?: number
 }
 
 export interface TreeTurn {
@@ -133,6 +183,10 @@ export interface TreeTurn {
   eventCount: number
   steps: TreeStep[]
   groups: TreeGroup[]
+  /** 本轮内被回退撤回的事件条数。 */
+  withdrawnCount?: number
+  /** 本轮回退标记次数（↶ 回退到本轮的某条消息）。 */
+  rewindCount?: number
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +225,9 @@ export interface ClosureSummary {
 export interface ClosureModel {
   rings: ClosureRing[]
   summary: ClosureSummary
+  /** dsh-rewind 回退统计（被撤回的事件不参与闭环计数）。 */
+  rewindCount: number
+  withdrawnCount: number
 }
 
 function ringLabel(kind: ClosureKind, d: Record<string, unknown>, fallback: string): string {
@@ -197,7 +254,9 @@ function ringDuration(openTime: number | null, closeTime: number | null | undefi
  *
  * 嵌套：tool/approval 归入其所在 step 的 children，step 归入 turn 的 children。
  */
-export function buildClosure(objs: Array<Record<string, unknown> | null>): ClosureModel {
+export function buildClosure(objs: Array<Record<string, unknown> | null>, opts?: RewindOpts): ClosureModel {
+  const rw = opts ?? rewindOptsOf(objs)
+  const { withdrawn, noiseSeqs } = rw
   const turns: ClosureRing[] = []
   const stack: ClosureRing[] = []   // 当前 open 的 turn/step（用于归属 children）
   const orphans: ClosureRing[] = [] // 无 turn 上下文时创建的环（如会话外的审批）
@@ -217,6 +276,20 @@ export function buildClosure(objs: Array<Record<string, unknown> | null>): Closu
     if (!o) continue
     const t = (o.type ?? "?") as string
     const d = (o.data ?? {}) as Record<string, unknown>
+    const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+    // 回退：被撤回的用户消息意味着其所在轮次整体被回退，该轮不再构成有效闭环
+    if (t === "user/message" && typeof seq === "number" && withdrawn.has(seq)) {
+      if (curTurnRing) {
+        const idx = turns.indexOf(curTurnRing)
+        if (idx >= 0) turns.splice(idx, 1)
+        stack.length = 0
+        curTurnRing = null
+        curStepRing = null
+      }
+      continue
+    }
+    // 幽灵步骤框架与撤回区间事件：不构成有效执行
+    if (typeof seq === "number" && (withdrawn.has(seq) || noiseSeqs.has(seq))) continue
     const time = (o.time as number) ?? null
 
     if (t === "turn/start") {
@@ -356,7 +429,7 @@ export function buildClosure(objs: Array<Record<string, unknown> | null>): Closu
   turns.forEach(countRing)
   orphans.forEach(countRing)
 
-  return { rings: [...turns, ...orphans], summary: { ...counts, unclosed } }
+  return { rings: [...turns, ...orphans], summary: { ...counts, unclosed }, rewindCount: rw.markers.length, withdrawnCount: withdrawn.size }
 }
 
 // ---------------------------------------------------------------------------
@@ -496,7 +569,8 @@ interface AccState extends ChunkGroupSpec {
 }
 
 /** 折叠树：turn → step → (合并组 + 独立事件)。 */
-export function buildTree(lines: string[], objs: Array<Record<string, unknown> | null>): TreeTurn[] {
+export function buildTree(lines: string[], objs: Array<Record<string, unknown> | null>, opts?: RewindOpts): TreeTurn[] {
+  const { withdrawn, noiseSeqs, markerSeqs } = opts ?? rewindOptsOf(objs)
   const turns: TreeTurn[] = []
   let curTurn: TreeTurn | null = null
   let curStep: TreeStep | null = null
@@ -533,16 +607,30 @@ export function buildTree(lines: string[], objs: Array<Record<string, unknown> |
   for (let i = 0; i < objs.length; i++) {
     const o = objs[i]
     if (!o) continue
+    const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+    const seqNum = typeof seq === "number" ? seq : null
+    // 回退标记：不计入树节点，仅累计到目标所在轮的 rewindCount
+    // （标记在轮次结束后追加，因此回退到「最后开始的轮」）
+    if (seqNum !== null && markerSeqs.has(seqNum)) {
+      const targetTurn = curTurn ?? turns[turns.length - 1]
+      if (targetTurn) targetTurn.rewindCount = (targetTurn.rewindCount ?? 0) + 1
+      continue
+    }
+    // 幽灵步骤框架与撤回区间事件：不参与有效树结构（撤回事件另行降权标注）
+    const isWithdrawn = seqNum !== null && withdrawn.has(seqNum)
+    if (seqNum !== null && noiseSeqs.has(seqNum)) continue
     const t = (o.type ?? "?") as string
     const d = (o.data ?? {}) as Record<string, unknown>
 
     if (t === "turn/start") {
+      closeGroup()
       curTurn = { turn: d.turn as number, startTime: (o.time as number) ?? null, startLine: i, eventCount: 0, steps: [], groups: [] }
       turns.push(curTurn)
       curStep = null
       continue
     }
     if (t === "turn/end") {
+      closeGroup()
       if (curTurn) { curTurn.endTime = (o.time as number) ?? null; curTurn.endLine = i }
       curTurn = null
       continue
@@ -566,10 +654,14 @@ export function buildTree(lines: string[], objs: Array<Record<string, unknown> |
     if (!host) continue
     host.eventCount++
     if (curTurn) curTurn.eventCount++
+    if (isWithdrawn) {
+      if (curStep) curStep.withdrawnCount = (curStep.withdrawnCount ?? 0) + 1
+      if (curTurn) curTurn.withdrawnCount = (curTurn.withdrawnCount ?? 0) + 1
+    }
 
-    // chunks 合并（不同 chunk 类型字段不同）
+    // chunks 合并（不同 chunk 类型字段不同）；被撤回的分片不并入合并组，降权单列
     const cg = CHUNK_GROUP[t]
-    if (cg && curStep) {
+    if (cg && curStep && !isWithdrawn) {
       if (!acc || acc.kind !== cg.kind) {
         closeGroup()
         acc = { ...cg, count: 0, chars: 0, dt: [], texts: [], startLine: i, endLine: i }
@@ -604,6 +696,7 @@ export function buildTree(lines: string[], objs: Array<Record<string, unknown> |
       summary: summarizeType(o),
       error: t === "tool/result" ? Boolean(d.error) : (t === "turn/end" ? ((d.reason ?? {}) as Record<string, unknown>).kind === "error" : false),
     }
+    if (isWithdrawn) item.withdrawn = true
     if (t === "tool/call") {
       let argsObj: Record<string, unknown> | null = null
       try { argsObj = JSON.parse(String(d.arguments ?? "{}")) } catch { argsObj = null }
@@ -657,7 +750,9 @@ export function buildSummary(
   objs: Array<Record<string, unknown> | null>,
   meta: { title: string | null; durationMs?: number; startTime?: number | null; endTime?: number | null },
   typeCounts: Record<string, number> | null,
+  opts?: RewindOpts,
 ): SummaryData {
+  const rw = opts ?? rewindOptsOf(objs)
   const summary: SummaryData = {
     title: meta.title ?? null,
     userRequest: null,
@@ -673,47 +768,61 @@ export function buildSummary(
     tokens: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, reasoningTokens: 0 },
     eventCount: typeCounts ? Object.values(typeCounts).reduce((a, b) => a + b, 0) : objs.length,
     openApprovals: 0,
+    rewindCount: rw.markers.length,
+    withdrawnCount: rw.withdrawn.size,
+    rewinds: [],
+    rewoundFiles: [],
   }
 
   const pendingApproval = new Map<string, { toolName: unknown; time: number | null }>()
   const toolCalls: Array<{ callId: string | null; name: string | null; args: unknown }> = []
   let firstUserMsg: string | null = null
 
+  // 预扫描：被回退的用户消息所在轮次 → 整轮视为已撤销（不参与任何统计）
+  const revertedTurns = new Set<number>()
+  {
+    let curTurnNum: number | null = null
+    for (const o of objs) {
+      if (!o) continue
+      const t = (o.type ?? "?") as string
+      const d = (o.data ?? {}) as Record<string, unknown>
+      const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+      if (t === "turn/start") curTurnNum = d.turn as number
+      else if (t === "turn/end") curTurnNum = null
+      else if (t === "user/message" && typeof seq === "number" && rw.withdrawn.has(seq) && curTurnNum !== null) {
+        revertedTurns.add(curTurnNum)
+      }
+    }
+  }
+
+  let curTurnNum: number | null = null
   for (const o of objs) {
     if (!o) continue
     const t = (o.type ?? "?") as string
     const d = (o.data ?? {}) as Record<string, unknown>
+    const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+    // 幽灵步骤框架与回退标记：内部机制，不计入任何统计
+    if (typeof seq === "number" && rw.noiseSeqs.has(seq)) continue
+    const isWithdrawn = typeof seq === "number" && rw.withdrawn.has(seq)
 
-    if (t === "turn/start") summary.turnCount++
-    else if (t === "step/start") summary.stepCount++
-    else if (t === "user/message") {
-      if (!firstUserMsg) {
-        const texts = ((d.content ?? []) as Array<Record<string, unknown>>)
-          .map((p) => (p.text as string) ?? `[${p.type}]`)
-          .filter(Boolean)
-        firstUserMsg = texts.join(" ").trim()
-        summary.userRequest = firstUserMsg.slice(0, 200)
-      }
-    } else if (t === "assistant/message") {
-      const u = (d.usage ?? {}) as Record<string, unknown>
-      summary.tokens.inputTokens += (u.inputTokens as number) ?? 0
-      summary.tokens.outputTokens += (u.outputTokens as number) ?? 0
-      summary.tokens.cacheReadTokens += (u.cacheReadTokens as number) ?? 0
-      summary.tokens.reasoningTokens += (u.reasoningTokens as number) ?? 0
-    } else if (t === "request/context" && !summary.model) {
-      summary.model = modelLabel(d.model)
-    } else if (t === "tool/call") {
+    if (t === "turn/start") {
+      curTurnNum = d.turn as number
+      if (!revertedTurns.has(curTurnNum)) summary.turnCount++
+      continue
+    }
+    if (t === "turn/end") { curTurnNum = null; continue }
+    if (t === "step/start") {
+      if (curTurnNum !== null && !revertedTurns.has(curTurnNum)) summary.stepCount++
+      continue
+    }
+    if (t === "tool/call") {
+      // 撤回轮次/撤回区间内的 tool/call 也保留用于配对（结果可能落在区间外），但统计在下方过滤
       let argsObj: Record<string, unknown> | null = null
       try { argsObj = JSON.parse(String(d.arguments ?? "{}")) } catch { argsObj = null }
       toolCalls.push({ callId: d.callId as string | null, name: d.name as string | null, args: argsObj })
-    } else if (t === "approval/asked") {
-      pendingApproval.set(d.id as string, { toolName: d.toolName, time: (o.time as number) ?? null })
-    } else if (t === "approval/decided") {
-      summary.approvalStats.total++
-      if (d.outcome === "denied") summary.approvalStats.denied++
-      else summary.approvalStats.allowed++
-      pendingApproval.delete(d.id as string)
-    } else if (t === "tool/result") {
+      continue
+    }
+    if (t === "tool/result") {
       const src = (((d.message ?? {}) as Record<string, unknown>).source as Record<string, unknown>)?.callId ?? null
       const metaObj = (d.meta ?? {}) as Record<string, unknown>
       const isError = Boolean(d.error)
@@ -725,7 +834,7 @@ export function buildSummary(
         const content = args.content as string | undefined
         const oldString = (args.old_string ?? args.oldString) as string | undefined
         const newString = (args.new_string ?? args.newString) as string | undefined
-        summary.files.push({
+        const change: FileChange = {
           path,
           action: metaObj.created ? "created" : "modified",
           time: (o.time as number) ?? null,
@@ -735,29 +844,103 @@ export function buildSummary(
           oldString: name === "edit" ? oldString : undefined,
           newString: name === "edit" ? newString : undefined,
           preview: name === "edit" ? newString?.slice(0, 120) : content?.slice(0, 120),
-        })
+        }
+        if (isWithdrawn) {
+          change.withdrawn = true
+          summary.rewoundFiles.push(change)
+        } else if (curTurnNum === null || !revertedTurns.has(curTurnNum)) {
+          summary.files.push(change)
+        }
       }
       if (src) {
         const idx = toolCalls.findIndex((c) => c.callId === src)
         if (idx >= 0) toolCalls.splice(idx, 1)
       }
+      continue
+    }
+    // 已被回退整轮撤销的轮次：其余内部事件全部不统计
+    if (curTurnNum !== null && revertedTurns.has(curTurnNum)) continue
+
+    if (t === "user/message") {
+      if (!isWithdrawn && !firstUserMsg) {
+        const texts = ((d.content ?? []) as Array<Record<string, unknown>>)
+          .map((p) => (p.text as string) ?? `[${p.type}]`)
+          .filter(Boolean)
+        firstUserMsg = texts.join(" ").trim()
+        summary.userRequest = firstUserMsg.slice(0, 200)
+      }
+    } else if (t === "assistant/message") {
+      if (!isWithdrawn) {
+        const u = (d.usage ?? {}) as Record<string, unknown>
+        summary.tokens.inputTokens += (u.inputTokens as number) ?? 0
+        summary.tokens.outputTokens += (u.outputTokens as number) ?? 0
+        summary.tokens.cacheReadTokens += (u.cacheReadTokens as number) ?? 0
+        summary.tokens.reasoningTokens += (u.reasoningTokens as number) ?? 0
+      }
+    } else if (t === "request/context" && !summary.model && !isWithdrawn) {
+      summary.model = modelLabel(d.model)
+    } else if (t === "approval/asked") {
+      if (!isWithdrawn) pendingApproval.set(d.id as string, { toolName: d.toolName, time: (o.time as number) ?? null })
+    } else if (t === "approval/decided") {
+      if (!isWithdrawn) {
+        summary.approvalStats.total++
+        if (d.outcome === "denied") summary.approvalStats.denied++
+        else summary.approvalStats.allowed++
+      }
+      pendingApproval.delete(d.id as string)
     }
   }
 
-  for (const o of objs) {
-    if (o?.type !== "tool/call") continue
-    const data = (o.data ?? {}) as Record<string, unknown>
-    const name = data.name as string | undefined
-    if (!name) continue
-    if (!summary.toolStats[name]) {
-      const h = humanTool(name)
-      summary.toolStats[name] = { icon: h.icon, verb: h.verb, count: 0 }
+  // 工具统计：仅计有效执行（非撤回区间、非已撤销轮次）
+  {
+    let curTurnNum2: number | null = null
+    for (const o of objs) {
+      if (!o) continue
+      const t = (o.type ?? "?") as string
+      const data = (o.data ?? {}) as Record<string, unknown>
+      if (t === "turn/start") { curTurnNum2 = data.turn as number; continue }
+      if (t === "turn/end") { curTurnNum2 = null; continue }
+      if (t !== "tool/call") continue
+      if (curTurnNum2 !== null && revertedTurns.has(curTurnNum2)) continue
+      const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+      if (typeof seq === "number" && (rw.noiseSeqs.has(seq) || rw.withdrawn.has(seq))) continue
+      const name = data.name as string | undefined
+      if (!name) continue
+      if (!summary.toolStats[name]) {
+        const h = humanTool(name)
+        summary.toolStats[name] = { icon: h.icon, verb: h.verb, count: 0 }
+      }
+      summary.toolStats[name].count++
     }
-    summary.toolStats[name].count++
   }
   summary.toolStats = Object.fromEntries(Object.entries(summary.toolStats).sort((a, b) => b[1].count - a[1].count))
   summary.approvalStats.pending = pendingApproval.size
+  summary.rewinds = rw.markers.map((m) => ({
+    markerSeq: m.markerSeq,
+    targetSeq: m.targetSeq,
+    time: m.time,
+    turn: m.turn,
+    withdrawnCount: m.withdrawnCount,
+    sourceEventSeqs: m.sourceEventSeqs,
+    targetPreview: m.targetSeq === null ? null : targetPreviewOf(objs, m.targetSeq),
+  }))
   return summary
+}
+
+/** 查找目标用户消息（seq 匹配）的文本预览，用于「回退到哪条消息」。 */
+function targetPreviewOf(objs: Array<Record<string, unknown> | null>, targetSeq: number): string | null {
+  for (const o of objs) {
+    if (!o || o.type !== "user/message") continue
+    const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+    if (seq !== targetSeq) continue
+    const d = (o.data ?? {}) as Record<string, unknown>
+    const texts = ((d.content ?? []) as Array<Record<string, unknown>>)
+      .map((p) => (p.text as string) ?? `[${p.type}]`)
+      .filter(Boolean)
+    const joined = texts.join(" ").trim()
+    return joined.length > 120 ? joined.slice(0, 120) + "…" : joined
+  }
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -772,7 +955,8 @@ function sentenceOf(text: unknown): string {
   return s.length > 100 ? s.slice(0, 100) + "…" : s
 }
 
-export function buildStory(lines: string[], objs: Array<Record<string, unknown> | null>): StoryTurn[] {
+export function buildStory(lines: string[], objs: Array<Record<string, unknown> | null>, opts?: RewindOpts): StoryTurn[] {
+  const rw = opts ?? rewindOptsOf(objs)
   const turns: StoryTurn[] = []
   let cur: StoryTurn | null = null
   let stepBuf: {
@@ -785,6 +969,22 @@ export function buildStory(lines: string[], objs: Array<Record<string, unknown> 
     assistantText: string | null
     assistantTime: number | null
   } | null = null
+
+  /** 在故事线上插入一条「↶ 回退」节点（放在标记所在位置/所在轮末尾）。 */
+  function pushRewindNode(marker: RewindMarker): void {
+    if (!marker) return
+    const turn = cur ?? turns[turns.length - 1]
+    if (!turn) return
+    const preview = marker.targetSeq === null ? null : targetPreviewOf(objs, marker.targetSeq)
+    turn.nodes.push({
+      kind: "rewind",
+      time: marker.time,
+      human: `↶ 回退至目标消息（撤回 ${marker.withdrawnCount} 条事件）`,
+      text: preview ?? undefined,
+      turn: turn.turn,
+      step: marker.step ?? 0,
+    })
+  }
 
   function flushStep(): void {
     if (!stepBuf || !cur) return
@@ -812,10 +1012,28 @@ export function buildStory(lines: string[], objs: Array<Record<string, unknown> 
     stepBuf = null
   }
 
+  /** 将一条「已回退」节点按事件顺序放入当前步骤（或当前轮）的节点列表。 */
+  function pushWithdrawn(node: StoryNode): void {
+    node.withdrawn = true
+    if (stepBuf) stepBuf.nodes.push(node)
+    else if (cur) cur.nodes.push(node)
+  }
+
   for (const o of objs) {
     if (!o) continue
     const t = (o.type ?? "?") as string
     const d = (o.data ?? {}) as Record<string, unknown>
+    const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+    const isWithdrawn = typeof seq === "number" && rw.withdrawn.has(seq)
+
+    // 回退标记 → 在故事线上插入「↶ 回退」边界节点
+    if (typeof seq === "number" && rw.markerSeqs.has(seq)) {
+      const marker = rw.markers.find((m) => m.markerSeq === seq)
+      if (marker) pushRewindNode(marker)
+      continue
+    }
+    // 幽灵步骤框架：内部机制，不进入故事线
+    if (typeof seq === "number" && rw.noiseSeqs.has(seq)) continue
 
     if (t === "turn/start") {
       cur = { turn: d.turn as number, startTime: (o.time as number) ?? null, nodes: [], eventCount: 0 }
@@ -829,6 +1047,51 @@ export function buildStory(lines: string[], objs: Array<Record<string, unknown> 
       continue
     }
     if (t === "step/end") { flushStep(); continue }
+
+    // 撤回区间事件：以降权节点原样呈现，便于对照「回退发生了什么」
+    if (isWithdrawn) {
+      const time = (o.time as number) ?? null
+      const turnNum = (d.turn as number) ?? cur?.turn ?? 0
+      const stepNum = (d.step as number) ?? stepBuf?.step ?? 0
+      if (t === "user/message") {
+        pushWithdrawn({ kind: "user", time, text: contentTextOf(d.content), human: "用户消息（已回退）", turn: turnNum, step: stepNum })
+      } else if (t === "reasoning-chunks" || t === "text-chunks") {
+        const texts = (d.texts ?? []) as string[]
+        pushWithdrawn({ kind: "reasoning", time, text: texts.join(""), human: "推理 / 输出内容（已回退）", turn: turnNum, step: stepNum })
+      } else if (t === "tool/call") {
+        let argsObj: Record<string, unknown> | null = null
+        try { argsObj = JSON.parse(String(d.arguments ?? "{}")) } catch { argsObj = null }
+        pushWithdrawn({
+          kind: "tool", time, name: d.name as string, human: toolSentence(d.name as string, argsObj),
+          callId: d.callId as string, args: d.arguments as string, turn: turnNum, step: stepNum,
+        })
+      } else if (t === "tool/result") {
+        const src = (((d.message ?? {}) as Record<string, unknown>).source as Record<string, unknown>)?.callId ?? null
+        const target = (stepBuf?.nodes ?? cur?.nodes ?? []).find((n) => n.kind === "tool" && n.withdrawn && n.callId === src)
+        if (target) {
+          target.result = resultSentence(target.name ?? null, d)
+          target.resultError = Boolean(d.error)
+        }
+      } else if (t === "approval/asked") {
+        pushWithdrawn({ kind: "approval", time, id: d.id as string, human: approvalSentence(d), toolName: d.toolName as string, turn: turnNum, step: stepNum })
+      } else if (t === "approval/decided") {
+        const target = (stepBuf?.nodes ?? cur?.nodes ?? []).find((n) => n.kind === "approval" && n.withdrawn && n.id === d.id)
+        if (target) {
+          target.outcome = d.outcome as string
+          target.outcomeHuman = d.outcome === "allowed-once" ? "✅ 已批准（一次）"
+            : d.outcome === "allowed-always" ? "✅ 已批准（始终）"
+            : d.outcome === "denied" ? "❌ 已拒绝" : (d.outcome as string) ?? "?"
+        }
+      } else if (t === "assistant/message") {
+        const msg = (d.message ?? {}) as Record<string, unknown>
+        const texts = ((msg.content ?? []) as Array<Record<string, unknown>>)
+          .filter((p) => p.type === "text")
+          .map((p) => p.text as string)
+          .filter(Boolean)
+        pushWithdrawn({ kind: "assistant", time, text: texts.join(" "), human: "模型回复（已回退）", turn: turnNum, step: stepNum })
+      }
+      continue
+    }
     if (!cur || !stepBuf) continue
 
     if (t === "user/message") {
@@ -943,6 +1206,12 @@ function summarizeType(o: Record<string, unknown>): string {
     }
     case "step/start": return "步骤开始"
     case "step/end": return "步骤结束"
+    case "reasoning-chunks":
+    case "text-chunks": {
+      const texts = (d.texts ?? []) as string[]
+      return texts.join("").slice(0, 120) || "—"
+    }
+    case "tool-call-chunks": return `${d.name ?? "工具"} 参数分片（${((d.args ?? []) as string[]).length} 段）`
     case "assistant/chunk": {
       const chunk = (d.chunk ?? {}) as Record<string, unknown>
       return `流式输出分片（${chunk.type ?? ""}）`

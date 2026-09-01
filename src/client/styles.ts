@@ -21,9 +21,11 @@ export function ensureStyles(): void {
 .seelogTurnStack{display:flex;flex-direction:column;gap:18px;padding:6px 4px 24px}
 .seelogTurnCard{border:1px solid #29465f;border-radius:14px;background:#152332;overflow:hidden}
 .seelogTurnHead{display:flex;align-items:center;gap:10px;padding:11px 16px;border-bottom:1px solid #29465f;background:#0e1d2d}
-.seelogTurnTitle{font-size:14px;font-weight:750;color:#eaf5ff}
+.seelogTurnIndex{font-size:11px;font-weight:800;color:#62a9ff;background:rgba(98,169,255,.12);border:1px solid rgba(98,169,255,.4);border-radius:6px;padding:2px 7px;flex-shrink:0;font-variant-numeric:tabular-nums}
+.seelogTurnTitle{font-size:15px;font-weight:800;color:#eaf5ff;letter-spacing:.2px}
+.seelogTurnOf{font-size:11px;color:#7f97ad;margin-left:-4px}
 .seelogTurnChip{font-size:11px;font-weight:650;padding:2px 10px;border-radius:999px;border:1px solid}
-.seelogTurnMeta{font-size:11px;color:#91a7bc}
+.seelogTurnMeta{font-size:11px;color:#91a7bc;font-variant-numeric:tabular-nums}
 .seelogTurnBody{overflow:auto}
 .seelogTurnSvg{display:block;width:100%;height:auto;min-width:420px}
 .seelogRingLabel{cursor:pointer}

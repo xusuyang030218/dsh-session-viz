@@ -378,6 +378,32 @@ body[data-ds-dark-theme] .dsvz-jnum{color:#79b8ff}
 body[data-ds-dark-theme] .dsvz-jlit{color:#ff7b72}
 body[data-ds-dark-theme] .dsvz-jpunc{color:#8b95a3}
 body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
+
+/* ===== dsh-rewind 回退可视化 ===== */
+.dsvz-rewind-banner{display:flex;gap:10px;align-items:center;flex-wrap:wrap;border:1px solid #d97706;background:rgba(217,119,6,.08);border-radius:12px;padding:10px 14px;margin:0 0 16px;font-size:12.5px}
+body[data-ds-dark-theme] .dsvz-rewind-banner{border-color:#f59e0b;background:rgba(245,158,11,.12)}
+.dsvz-rewind-banner .ic{font-size:16px}
+.dsvz-rewind-banner .tt{font-weight:700;color:var(--dsw-alias-label-primary,#1e293b)}
+.dsvz-rewind-banner .sub{color:var(--dsw-alias-label-secondary,#8493ab);font-size:11.5px;flex-basis:100%}
+.dsvz-rewind-banner .tgt{font-family:var(--dsw-font-mono,Consolas,monospace);font-size:11px;color:#b45309;background:rgba(217,119,6,.1);border-radius:6px;padding:2px 8px;max-width:420px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dsvz-rewind-chip{display:inline-flex;align-items:center;gap:3px;font-size:10px;font-weight:700;color:#b45309;background:rgba(217,119,6,.12);border:1px solid rgba(217,119,6,.45);border-radius:999px;padding:1px 8px;flex-shrink:0;white-space:nowrap}
+body[data-ds-dark-theme] .dsvz-rewind-chip{color:#fbbf24;background:rgba(245,158,11,.14);border-color:rgba(245,158,11,.5)}
+.dsvz-ev.wd{opacity:.55}
+.dsvz-ev.wd .es,.dsvz-ev.wd .eh{text-decoration:line-through;text-decoration-color:rgba(128,128,128,.7)}
+.dsvz-ev.wd .etl{border-style:dashed}
+.dsvz-ev .wd-tag{font-size:9.5px;font-weight:700;color:#b45309;border:1px solid rgba(217,119,6,.4);border-radius:999px;padding:0 5px;flex-shrink:0;margin-left:6px}
+body[data-ds-dark-theme] .dsvz-ev .wd-tag{color:#fbbf24}
+.dsvz-stephead .dsvz-rewind-chip,.dsvz-turnhead .dsvz-rewind-chip{margin-left:8px}
+.dsvz-story-node.wd{opacity:.55}
+.dsvz-story-node.wd .nh{text-decoration:line-through;text-decoration-color:rgba(128,128,128,.7)}
+.dsvz-story-node.rewind{border-left:3px solid #d97706;background:rgba(217,119,6,.07)}
+.dsvz-story-node.rewind .nh{font-weight:700;color:#b45309}
+body[data-ds-dark-theme] .dsvz-story-node.rewind{border-left-color:#f59e0b;background:rgba(245,158,11,.1)}
+body[data-ds-dark-theme] .dsvz-story-node.rewind .nh{color:#fbbf24}
+.dsvz-file.wd{opacity:.55}
+.dsvz-file.wd .pth{text-decoration:line-through;text-decoration-color:rgba(128,128,128,.7)}
+.dsvz-sum-rewound{border:1px dashed rgba(217,119,6,.5);border-radius:12px;padding:4px 0;margin-top:8px}
+.dsvz-sum-rewound .dsvz-files{border:none;border-radius:0}
 `
     function ensureStyles() {
       const id = 'dsh-session-viz/css'
@@ -684,7 +710,9 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
             React.createElement('span', { className: 'dsvz-typechip', style: { background: gstyle.bg, color: gstyle.fg, border: '1px solid ' + gstyle.border, borderRadius: 999, padding: '0 8px', fontSize: 11, fontWeight: 700 } }, devMode ? ev.type : (gstyle.label ?? ev.type)),
             devMode && React.createElement('span', { style: { fontFamily: 'var(--dsw-font-mono,Consolas,monospace)', fontSize: 11, color: 'var(--dsw-alias-label-secondary,#8493ab)' } }, `#${ev.seq ?? ev.line} · ${ev.time ? fmtTime(ev.time) : ''}`),
             !devMode && React.createElement('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-secondary,#8493ab)' } }, ev.time ? fmtTime(ev.time) : ''),
-            ev.error && React.createElement('span', { style: { color: '#dc2626', fontWeight: 700, fontSize: 11 } }, '⚠ 错误')),
+            ev.error && React.createElement('span', { style: { color: '#dc2626', fontWeight: 700, fontSize: 11 } }, '⚠ 错误'),
+            ev.rewind && React.createElement('span', { style: { color: '#b45309', fontWeight: 700, fontSize: 11 } }, '↶ 回退标记'),
+            ev.withdrawn && React.createElement('span', { style: { color: '#b45309', fontWeight: 700, fontSize: 11 } }, '↶ 已回退')),
           tab === '解读' && React.createElement('table', { className: 'dsvz-kv' },
             rows.map(([k, v], i) => React.createElement('tr', { key: i },
               React.createElement('td', null, k),
@@ -1012,6 +1040,12 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
               React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#ef4444' } }), '失败'),
             ),
           ),
+          // 回退提示（dsh-rewind）
+          (closure.rewindCount || 0) > 0 && React.createElement('div', { className: 'dsvz-rewind-banner' },
+            React.createElement('span', { className: 'ic' }, '↶'),
+            React.createElement('span', { className: 'tt' }, `会话发生过 ${closure.rewindCount} 次回退`),
+            React.createElement('span', { className: 'sub' }, `共撤回 ${closure.withdrawnCount ?? 0} 条事件；撤回内容已从闭环统计与时间线中剔除，详情见「摘要」与「事件树」。`),
+          ),
           // 统计卡
           React.createElement('div', { className: 'dsvz-home-cards' },
             cards.map((c) => React.createElement('div', { key: c.k, className: 'dsvz-home-card' },
@@ -1082,6 +1116,21 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
     }
 
     // ===== 第一层：执行摘要 =====
+    function RewindBanner({ summary }) {
+      const list = summary?.rewinds || []
+      if (!list.length) return null
+      const rolledFiles = (summary.rewoundFiles || []).length
+      return React.createElement('div', { className: 'dsvz-rewind-banner' },
+        React.createElement('span', { className: 'ic' }, '↶'),
+        React.createElement('span', { className: 'tt' }, `会话发生过 ${summary.rewindCount ?? list.length} 次回退`),
+        React.createElement('span', { className: 'sub' },
+          `共撤回 ${summary.withdrawnCount ?? 0} 条事件${rolledFiles ? `、${rolledFiles} 个文件变更` : ''}；下方被划掉的事件即回退撤回的内容，不再计入本次会话的有效执行。`),
+        list.map((r, i) =>
+          React.createElement('span', { key: i, className: 'tgt', title: r.targetPreview ?? '（无文本）' },
+            `↶ 第 ${i + 1} 次：回退到「${String(r.targetPreview || '（空消息）').slice(0, 40)}」· 撤回 ${r.withdrawnCount ?? 0} 条`)),
+      )
+    }
+
     function SummaryView({ summary, onStory, onTree, onSelectFile, devMode, turns, onPos }) {
       const [openFiles, setOpenFiles] = React.useState(new Set())
       const toggleFile = (i) => setOpenFiles((prev) => { const n = new Set(prev); n.has(i) ? n.delete(i) : n.add(i); return n })
@@ -1121,6 +1170,7 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
               s.model && React.createElement('span', { className: 'dsvz-stat' }, `🧠 ${esc(s.model)}`),
             ),
           ),
+          (s.rewinds || []).length > 0 && React.createElement(RewindBanner, { summary: s }),
           toolEntries.length > 0 && React.createElement('div', null,
             React.createElement('div', { className: 'dsvz-sec' }, '工具使用'),
             React.createElement('div', { className: 'dsvz-toolgrid' },
@@ -1163,6 +1213,19 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
                   ),
                 )
               }))),
+          (s.rewoundFiles || []).length > 0 && React.createElement('div', null,
+            React.createElement('div', { className: 'dsvz-sec' }, `已回退的文件变更（${s.rewoundFiles.length}）`),
+            React.createElement('div', { className: 'dsvz-sum-rewound' },
+              React.createElement('div', { className: 'dsvz-files' },
+                s.rewoundFiles.map((f, i) =>
+                  React.createElement('div', { key: i, className: 'dsvz-file wd' },
+                    React.createElement('span', { className: 'act m' }, '↶ 已回退'),
+                    React.createElement('span', { className: 'pth', title: f.path }, devMode ? f.path : shortPath(f.path)),
+                    f.lines != null && React.createElement('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary,#8493ab)', flexShrink: 0 } }, `${f.lines} 行`),
+                  )),
+              ),
+            ),
+          ),
           React.createElement('div', null,
             React.createElement('div', { className: 'dsvz-sec' }, 'Token 用量'),
             React.createElement('div', { className: 'dsvz-tokens' },
@@ -1214,10 +1277,10 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
                   // 推理/消息正文始终可展开；工具参数（原始 JSON）仅开发者模式展开
                   const detail = n.text || ''
                   const showArgs = devMode && !!n.args
-                  return React.createElement('div', { key, className: `dsvz-story-node ${n.kind}${open ? ' open' : ''}` },
+                  return React.createElement('div', { key, className: `dsvz-story-node ${n.kind}${open ? ' open' : ''}${n.withdrawn ? ' wd' : ''}` },
                     React.createElement('span', { className: 'nt' }, relTime(n.time, baseTime)),
                     React.createElement('span', { className: 'nh' }, esc(n.human || '')),
-                    (n.kind === 'reasoning' || n.kind === 'user' || n.kind === 'assistant') && detail && React.createElement('span', { className: 'arrow', onClick: () => toggleNode(key) }, open ? '▲ 收起' : '▼ 展开'),
+                    (n.kind === 'reasoning' || n.kind === 'user' || n.kind === 'assistant' || n.kind === 'rewind') && detail && React.createElement('span', { className: 'arrow', onClick: () => toggleNode(key) }, open ? '▲ 收起' : '▼ 展开'),
                     showArgs && React.createElement('span', { className: 'arrow', onClick: () => toggleNode(key) }, open ? '▲ 收起' : '▼ 参数'),
                     detail && React.createElement('div', { className: 'nd' }, esc(String(detail).slice(0, 2000))),
                     showArgs && open && React.createElement('div', { className: 'nd' }, esc(String(n.args).slice(0, 2000))),
@@ -1320,6 +1383,7 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
               React.createElement('span', { className: 'chev' }, '▶'),
               React.createElement('span', { className: 'sb' }, `Step ${st.step}`),
               React.createElement('span', { className: 'sm' }, `${fmtNum(st.eventCount)} 条 · ${fmtDur(dur(st))}${st.tools?.length ? ' · ' + [...new Set(st.tools)].slice(0, 3).join(', ') : ''}`),
+              (st.withdrawnCount ?? 0) > 0 && React.createElement('span', { className: 'dsvz-rewind-chip', title: '本步被回退撤回的事件' }, `已回退 ${st.withdrawnCount} 条`),
             ),
             stepOpen && React.createElement('div', { className: 'dsvz-groupwrap' },
               groups.map((g, gi) => {
@@ -1345,6 +1409,8 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
             React.createElement('span', { className: 'chev' }, '▶'),
             React.createElement('span', { className: 'tb' }, `Turn ${tr.turn}`),
             React.createElement('span', { className: 'tm' }, `${fmtNum(tr.eventCount)} 条 · ${fmtDur(dur(tr))}`),
+            (tr.rewindCount ?? 0) > 0 && React.createElement('span', { className: 'dsvz-rewind-chip', title: '本轮发生过就地回退' }, `↶ 回退 ${tr.rewindCount}`),
+            (tr.withdrawnCount ?? 0) > 0 && React.createElement('span', { className: 'dsvz-rewind-chip', title: '本轮被回退撤回的事件' }, `已回退 ${tr.withdrawnCount} 条`),
           ),
           turnOpen && React.createElement('div', { className: 'dsvz-stepwrap' },
             stepEls,
@@ -1408,13 +1474,15 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
       const inner = React.createElement('span', { className: isChunk ? 'eh' : 'es', dangerouslySetInnerHTML: { __html: highlightQ(esc(text), ql) } })
       return React.createElement('div', {
         key: ev.line,
-        className: 'dsvz-ev' + (selectedLine === ev.line ? ' sel' : '') + (ev.error ? ' err' : ''),
+        className: 'dsvz-ev' + (selectedLine === ev.line ? ' sel' : '') + (ev.error ? ' err' : '') + (ev.withdrawn ? ' wd' : ''),
         onClick,
         style: { borderLeftColor: g.border },
+        title: ev.withdrawn ? '该事件已被回退撤回（不再生效）' : undefined,
       },
         React.createElement('span', { className: 'et' }, ev.seq != null ? `#${ev.seq}` : `L${ev.line}`),
         React.createElement('span', { className: 'etl', style: { background: g.bg, color: g.fg, borderColor: g.border } }, ev.type),
         inner,
+        ev.withdrawn && React.createElement('span', { className: 'wd-tag' }, '↶ 已回退'),
         React.createElement('span', { className: 'ed' }, ev.time ? relTime(ev.time, baseTime) : ''),
       )
     }

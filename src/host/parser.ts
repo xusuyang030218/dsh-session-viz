@@ -35,6 +35,10 @@ export interface EventMeta {
   endTime: number | null
   durationMs: number
   sizeBytes?: number | null
+  /** 会话内 dsh-rewind 就地回退的次数。 */
+  rewindCount?: number
+  /** 被回退撤回（不再生效）的事件条数。 */
+  withdrawnCount?: number
 }
 
 export interface LightEvent {
@@ -46,6 +50,10 @@ export interface LightEvent {
   summary: string
   error?: boolean
   tokens?: Record<string, unknown> | null
+  /** 该事件位于某次回退的撤回区间内（[目标消息 seq, 回退标记 seq)），已不生效。 */
+  withdrawn?: boolean
+  /** 该事件属于回退标记本身或它的幽灵步骤框架（内部机制，不进入有效执行）。 */
+  rewind?: boolean
 }
 
 export interface ParsedSession {
@@ -55,6 +63,141 @@ export interface ParsedSession {
   groupCounts: Record<string, number>
   search: Map<number, string>
   sizeBytes?: number | null
+  /** 检测到的 dsh-rewind 回退标记（按日志顺序）。 */
+  rewinds: RewindMarker[]
+}
+
+// ---------------------------------------------------------------------------
+// dsh-rewind 回退标记识别
+// ---------------------------------------------------------------------------
+
+/**
+ * 一次 dsh-rewind 就地回退在日志中留下的痕迹：
+ *
+ * ```text
+ * step/start  { turn: <最后开始的轮>, step: <该轮下一个未用步号> }   ← 幽灵步骤框架
+ * assistant/message { message: { content: [], source: { provider: "dsh-rewind", model: "rewind-marker" } },
+ *                     surfaceOp: { op: "replace", start: <目标 seq>, end: <末个遮蔽 seq> },
+ *                     sourceEventSeqs: [<目标消息起全部 surface seq>] }
+ * step/end    { turn, step }
+ * ```
+ *
+ * 撤回语义：目标消息 seq（含）之后、标记 seq（不含）之前的**全部**事件都已
+ * 从模型上下文与界面撤回（标记本身是空消息，不进入上下文）。sourceEventSeqs
+ * 只列出 surface 上的消息，但撤回区间覆盖其间所有事件（tool/call、turn/start 等）。
+ */
+export interface RewindMarker {
+  /** 标记事件自身的 seq（插件的 sourceEventSeq）。 */
+  markerSeq: number | null
+  /** 回退目标用户消息的 seq（surfaceOp.start）。 */
+  targetSeq: number | null
+  /** 幽灵步骤框架的 step/start 与 step/end 事件 seq（内部机制，不参与有效执行）。 */
+  ghostStartSeq: number | null
+  ghostEndSeq: number | null
+  time: number | null
+  turn: number | null
+  step: number | null
+  /** 插件记录的 surface 撤回 seq 列表（sourceEventSeqs）。 */
+  sourceEventSeqs: number[]
+  /** 撤回区间 [targetSeq, markerSeq) 内全部事件条数（含非 surface 事件）。 */
+  withdrawnCount: number
+}
+
+export interface RewindInfo {
+  markers: RewindMarker[]
+  /** 标记事件自身的 seq 集合（用于剔除幽灵框架与标记行）。 */
+  markerSeqs: Set<number>
+  /** 幽灵步骤框架 step/start + step/end 的 seq 集合（内部机制，剔除）。 */
+  noiseSeqs: Set<number>
+  /** 撤回区间内全部事件 seq（目标消息 seq 含、标记 seq 不含）。 */
+  withdrawnSeqs: Set<number>
+}
+
+function isRewindMarker(o: Record<string, unknown> | null): boolean {
+  if (!o || typeof o !== "object") return false
+  if (o.type !== "assistant/message") return false
+  const sop = o.surfaceOp
+  if (typeof sop !== "object" || sop === null || (sop as Record<string, unknown>).op !== "replace") return false
+  if (!Array.isArray(o.sourceEventSeqs)) return false
+  const d = (o.data ?? {}) as Record<string, unknown>
+  const msg = (d.message ?? {}) as Record<string, unknown>
+  const src = (msg.source ?? {}) as Record<string, unknown>
+  return src.provider === "dsh-rewind" || src.model === "rewind-marker"
+}
+
+/** 扫描事件序列，识别 dsh-rewind 回退标记并推导撤回区间（纯函数，无 I/O）。 */
+export function detectRewinds(objs: Array<Record<string, unknown> | null>): RewindInfo {
+  const markers: RewindMarker[] = []
+  const markerSeqs = new Set<number>()
+  const noiseSeqs = new Set<number>()
+  const seqAt = new Map<number, Record<string, unknown>>()
+
+  for (let i = 0; i < objs.length; i++) {
+    const o = objs[i]
+    if (!o) continue
+    const seq = (o.seq as number | undefined) ?? (o.seq0 as number | undefined)
+    if (typeof seq === "number") seqAt.set(seq, o)
+    if (!isRewindMarker(o)) continue
+    const d = (o.data ?? {}) as Record<string, unknown>
+    const sop = o.surfaceOp as Record<string, unknown>
+    const targetSeq = Number(sop.start ?? (o.sourceEventSeqs as number[])[0])
+    const sourceEventSeqs = (o.sourceEventSeqs as unknown[])
+      .map((s) => Number(s))
+      .filter((s) => Number.isSafeInteger(s))
+    const turn = (d.turn as number | undefined) ?? null
+    const step = (d.step as number | undefined) ?? null
+
+    // 幽灵步骤框架：标记前后相邻的 step/start 与 step/end（同一 turn/step）
+    let ghostStartSeq: number | null = null
+    let ghostEndSeq: number | null = null
+    for (let j = i - 1; j >= 0; j--) {
+      const prev = objs[j]
+      if (!prev) continue
+      if (prev.type !== "step/start") break
+      const pd = (prev.data ?? {}) as Record<string, unknown>
+      if (pd.turn === turn && pd.step === step) { ghostStartSeq = (prev.seq as number | undefined) ?? null; break }
+    }
+    for (let j = i + 1; j < objs.length; j++) {
+      const next = objs[j]
+      if (!next) continue
+      if (next.type !== "step/end") break
+      const nd = (next.data ?? {}) as Record<string, unknown>
+      if (nd.turn === turn && nd.step === step) { ghostEndSeq = (next.seq as number | undefined) ?? null; break }
+    }
+
+    const markerSeq = (o.seq as number | undefined) ?? null
+    if (markerSeq !== null) markerSeqs.add(markerSeq)
+    if (ghostStartSeq !== null) noiseSeqs.add(ghostStartSeq)
+    if (ghostEndSeq !== null) noiseSeqs.add(ghostEndSeq)
+    if (markerSeq !== null) noiseSeqs.add(markerSeq)
+
+    markers.push({
+      markerSeq,
+      targetSeq: Number.isSafeInteger(targetSeq) ? targetSeq : (sourceEventSeqs[0] ?? null),
+      ghostStartSeq,
+      ghostEndSeq,
+      time: (o.time as number | undefined) ?? null,
+      turn,
+      step,
+      sourceEventSeqs,
+      withdrawnCount: 0, // 下方按区间填充
+    })
+  }
+
+  // 撤回区间 = [targetSeq, markerSeq) 内的全部事件 seq
+  const withdrawnSeqs = new Set<number>()
+  for (const marker of markers) {
+    const lo = marker.targetSeq
+    const hi = marker.markerSeq
+    if (lo === null || hi === null) continue
+    let count = 0
+    for (const seq of seqAt.keys()) {
+      if (seq >= lo && seq < hi) { withdrawnSeqs.add(seq); count++ }
+    }
+    marker.withdrawnCount = count
+  }
+
+  return { markers, markerSeqs, noiseSeqs, withdrawnSeqs }
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +506,8 @@ export function parseLine(raw: string, lineIdx: number): LightEvent | null {
 export function parseLogText(text: string): ParsedSession {
   const lines = text.split("\n")
   const events: LightEvent[] = []
-  const meta: EventMeta = { title: null, cwd: null, createdAt: null, agentPreset: null, delegationDepth: null, eventCount: 0, startTime: null, endTime: null, durationMs: 0 }
+  const objs: Array<Record<string, unknown> | null> = []
+  const meta: EventMeta = { title: null, cwd: null, createdAt: null, agentPreset: null, delegationDepth: null, eventCount: 0, startTime: null, endTime: null, durationMs: 0, rewindCount: 0, withdrawnCount: 0 }
   const typeCounts: Record<string, number> = {}
   const groupCounts: Record<string, number> = {}
   const search = new Map<number, string>()
@@ -378,6 +522,7 @@ export function parseLogText(text: string): ParsedSession {
     const ev = parseLine(raw, i)
     if (!ev) continue
     events.push(ev)
+    objs.push(o)
     typeCounts[ev.type] = (typeCounts[ev.type] ?? 0) + 1
     groupCounts[ev.group] = (groupCounts[ev.group] ?? 0) + 1
     const d = (o.data ?? {}) as Record<string, unknown>
@@ -414,11 +559,21 @@ export function parseLogText(text: string): ParsedSession {
     }
   }
 
+  // 回退标记识别：标注撤回事件 / 标记事件，并写入会话级统计
+  const { markers, markerSeqs, noiseSeqs, withdrawnSeqs } = detectRewinds(objs)
+  for (const ev of events) {
+    if (ev.seq === null) continue
+    if (withdrawnSeqs.has(ev.seq)) ev.withdrawn = true
+    if (markerSeqs.has(ev.seq) || noiseSeqs.has(ev.seq)) ev.rewind = true
+  }
+  meta.rewindCount = markers.length
+  meta.withdrawnCount = withdrawnSeqs.size
+
   meta.eventCount = events.length
   meta.startTime = startTime
   meta.endTime = endTime
   meta.durationMs = startTime != null && endTime != null ? Math.max(0, endTime - startTime) : 0
-  return { meta, events, typeCounts, groupCounts, search }
+  return { meta, events, typeCounts, groupCounts, search, rewinds: markers }
 }
 
 /** 读取 + 解码 + 解析一个会话（整文件缓存由调用方负责）。 */

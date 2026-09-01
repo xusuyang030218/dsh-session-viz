@@ -106,6 +106,8 @@ export function SessionMapView({ sessionId }: ConvViewProps) {
     {snapshot !== null && <section className="seelogStats" aria-label="会话图概览">
       <div><b>{String(snapshot.sessions.reduce((total, session) => total + (session.sourceEventCount ?? session.nodes.length), 0))}</b><span>原始日志事件</span></div>
       <div><b>{String(displayedCount)}</b><span>语义节点</span></div>
+      <div><b>{String(snapshot.sessions.reduce((total, session) => total + (session.rewindCount ?? 0), 0))}</b><span>回退次数</span></div>
+      <div><b>{String(snapshot.sessions.reduce((total, session) => total + (session.withdrawnEventCount ?? 0), 0))}</b><span>撤回事件</span></div>
       <div><b>{String(snapshot.sessions.length)}</b><span>会话与子 Agent</span></div>
       <div><b>{timeLabel(snapshot.capturedAt)}</b><span>刷新时间</span></div>
     </section>}

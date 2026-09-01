@@ -70,33 +70,77 @@ function nodeFor(event: SessionEvent, sessionId: string, node: Omit<MutableFlowN
   return { id: eventNodeId(sessionId, event.seq), sessionId, seq: event.seq, time: event.time, ...node }
 }
 
-function projectEvents(sessionId: string, events: readonly SessionEvent[], maximum: number): Pick<FlowSession, 'nodes' | 'omittedEvents'> {
+function projectEvents(sessionId: string, events: readonly SessionEvent[], maximum: number): Pick<FlowSession, 'nodes' | 'omittedEvents' | 'rewindCount' | 'withdrawnEventCount'> {
   const omittedEvents = Math.max(0, events.length - maximum)
   const tail = events.slice(omittedEvents)
   const nodes: MutableFlowNode[] = []
   const calls = new Map<string, MutableFlowNode>()
 
+  // dsh-rewind：识别回退标记，推导撤回区间 [targetSeq, markerSeq)
+  // 标记事件形如 assistant/message + surfaceOp{op:'replace'} + sourceEventSeqs[]，
+  // 与普通 harness surfaceOp（字符串 "append"）严格区分。
+  const markerSeqs = new Set<number>()
+  const noiseSeqs = new Set<number>()
+  const withdrawnSeqs = new Set<number>()
+  const seqList: number[] = []
   for (const event of tail) {
+    const seq = typeof event.seq === 'number' ? event.seq : null
+    if (seq !== null) seqList.push(seq)
+    const surfaceOp = (event as { surfaceOp?: unknown }).surfaceOp
+    const sourceEventSeqs = (event as { sourceEventSeqs?: unknown }).sourceEventSeqs
+    if (
+      event.type === 'assistant/message' &&
+      typeof surfaceOp === 'object' && surfaceOp !== null &&
+      (surfaceOp as { op?: string }).op === 'replace' &&
+      Array.isArray(sourceEventSeqs)
+    ) {
+      const d = (event.data ?? {}) as Record<string, unknown>
+      const msg = (d.message ?? {}) as Record<string, unknown>
+      const src = (msg.source ?? {}) as Record<string, unknown>
+      if (src.provider === 'dsh-rewind' || src.model === 'rewind-marker') {
+        if (seq !== null) markerSeqs.add(seq)
+        const target = Number((surfaceOp as { start?: unknown }).start ?? sourceEventSeqs[0])
+        if (Number.isSafeInteger(target) && seq !== null) {
+          noiseSeqs.add(seq)
+          for (const s of seqList) if (s >= target && s < seq) withdrawnSeqs.add(s)
+        }
+      }
+    }
+  }
+
+  let currentTurn: number | undefined
+  for (const event of tail) {
+    const seq = typeof event.seq === 'number' ? event.seq : null
+    // 回退标记 + 幽灵步骤框架：内部机制，不投影
+    if (seq !== null && (noiseSeqs.has(seq) || markerSeqs.has(seq))) continue
+    // 撤回区间事件：已不生效，不投影
+    if (seq !== null && withdrawnSeqs.has(seq)) continue
+    // 事件本身常不带 data.turn（如 user/message），用最近一次 turn/start 补齐轮次归属
+    const turnOf = (): number | undefined => {
+      const t = (event.data as { turn?: unknown }).turn
+      return typeof t === 'number' ? t : currentTurn
+    }
     switch (event.type) {
       case 'turn/start':
+        currentTurn = event.data.turn
         nodes.push(nodeFor(event, sessionId, {
           kind: 'turn', title: `Turn ${String(event.data.turn)}`, status: 'completed', turn: event.data.turn,
         }))
         break
       case 'user/message':
         nodes.push(nodeFor(event, sessionId, {
-          kind: 'input', title: event.data.source.kind === 'user' ? 'User input' : 'Injected context', status: 'completed',
+          kind: 'input', title: event.data.source.kind === 'user' ? 'User input' : 'Injected context', status: 'completed', turn: turnOf(),
         }))
         break
       case 'assistant/message':
         nodes.push(nodeFor(event, sessionId, {
-          kind: 'model', title: 'Model response', status: 'completed', turn: event.data.turn, step: event.data.step,
+          kind: 'model', title: 'Model response', status: 'completed', turn: turnOf(), step: event.data.step,
         }))
         break
       case 'tool/call': {
         const callId = String(event.data.callId)
         const node = nodeFor(event, sessionId, {
-          kind: 'tool', title: event.data.name, status: 'running', turn: event.data.turn, step: event.data.step, callId,
+          kind: 'tool', title: event.data.name, status: 'running', turn: turnOf(), step: event.data.step, callId,
         })
         calls.set(callId, node)
         nodes.push(node)
@@ -115,6 +159,7 @@ function projectEvents(sessionId: string, events: readonly SessionEvent[], maxim
         }
         nodes.push(nodeFor(event, sessionId, {
           kind: error ? 'error' : 'tool', title: 'Tool result', status: error ? 'error' : 'completed', callId,
+          turn: turnOf(), step: event.data.step,
           detail: error ? event.data.error?.code ?? 'Tool returned an error' : undefined,
         }))
         break
@@ -122,7 +167,7 @@ function projectEvents(sessionId: string, events: readonly SessionEvent[], maxim
       case 'turn/end':
         if (event.data.reason.kind === 'error') {
           nodes.push(nodeFor(event, sessionId, {
-            kind: 'error', title: 'Turn failed', status: 'error', turn: event.data.turn, detail: event.data.reason.error.code,
+            kind: 'error', title: 'Turn failed', status: 'error', turn: currentTurn ?? event.data.turn, detail: event.data.reason.error.code,
           }))
         }
         break
@@ -130,7 +175,7 @@ function projectEvents(sessionId: string, events: readonly SessionEvent[], maxim
         break
     }
   }
-  return { nodes, omittedEvents }
+  return { nodes, omittedEvents, rewindCount: markerSeqs.size, withdrawnEventCount: withdrawnSeqs.size }
 }
 
 function descendantIds(nodes: readonly SessionLineageNode[]): string[] {
