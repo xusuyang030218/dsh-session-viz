@@ -4,7 +4,7 @@
  *   ▸ AgentTrace 查看器：会话头部「◈ AgentTrace」按钮，打开后包含——
  *       🏠 首页（会话过程闭环总览）
  *       📋 摘要 / 📖 故事线 / 🔬 事件树
- *       🗺 会话图（Three.js 3D 主执行线 + 子 Agent 分叉，融合 dsh-seelog）
+ *       🗺 会话图（SVG 闭环轮环图：每个轮次一个环、子 Agent 分叉环，融合 dsh-seelog）
  *
  * 「会话图」不再占用独立的 conversation.view 标签页，而是作为 AgentTrace
  * 内部的一个模式（见 legacy-viewer.js 的 registerExtraMode）。

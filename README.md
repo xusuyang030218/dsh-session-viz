@@ -19,7 +19,7 @@
 | 📋 摘要 | 所有人 | 执行摘要卡片：用户需求、轮次/步骤/耗时、工具使用 Top（图标+中文名）、审批结果、**文件变更记录（可展开查看修改 diff / 新增内容）**、Token 用量，无技术术语 |
 | 📖 故事线 | 管理者 | 叙事式时间线：人类语言描述（「📖 AI 读取了 REQUIREMENTS.md」「⚠️ 请求审批 → ✅ 已批准」），推理折叠为摘要，点击展开 |
 | 🔬 事件树 | 开发者 | turn → step → 合并事件组 树形结构，按 14 组配色着色，搜索框 + 分组类型下拉，毫秒级/相对时间，**右侧事件详情（请求参数 JSON / 返回值 / 错误 / meta / 原始行）** |
-| 🗺 会话图 | 所有人 | Three.js 3D 主执行线 + 子 Agent 分叉汇回 + 固定时间概览尺 + 节点检查器（融合 [dsh-seelog](https://github.com/lhwu1/dsh-seelog)）。作为 AgentTrace 的内部模式，首页也可一键打开 |
+| 🗺 会话图 | 所有人 | **SVG 闭环轮环图**：每个轮次一个同心圆环（T1 在内、越靠外越晚），环上按时间把步骤切成弧段、事件节点落在环上；子 Agent 是从主环分叉出去再汇回的小环；闭合=绿实线、进行中=琥珀虚线脉冲、失败=红；悬停看节点语义、点击进检查器。作为 AgentTrace 的内部模式，首页也可一键打开 |
 
 ### 首页：会话过程闭环总览
 
@@ -211,9 +211,9 @@ host 半与 client 半现在都由 tsdown 构建：
 | `lib/host/index.mjs` | `src/host/index.ts` | 主 host 半 |
 | `lib/host/web.mjs` | `src/host/web.ts` | AgentTrace 数据路由（`/dsh-session-viz/api/*`） |
 | `lib/host/map-web.mjs` | `src/host/map-web.ts` | 会话图快照路由（`/dsh-session-viz/api/map/*`） |
-| `lib/client.js` | `src/client/index.ts` | 单一浏览器 bundle：AgentTrace 查看器 + 3D 会话图（约 1.35 MB，Three.js 已内联） |
+| `lib/client.js` | `src/client/index.ts` | 单一浏览器 bundle：AgentTrace 查看器 + SVG 闭环轮环图（约 140 KB，无 Three.js） |
 
-client 半原为**零构建手写 JS**；融合会话图（TSX + Three.js）后改为构建产出单一
+client 半原为**零构建手写 JS**；融合会话图后改为构建产出单一
 bundle——`dsh.client` 只能声明一个 `./client` 入口，所有视图必须合并到同一个
 `window.__ModuleLoader__.load` 包装里。手写查看器原样保留在
 `src/client/legacy-viewer.js` 参与打包，未做大规模重写。
@@ -221,13 +221,17 @@ bundle——`dsh.client` 只能声明一个 `./client` 入口，所有视图必�
 会话图作为 AgentTrace 的**内部模式**注入：`legacy-viewer.js` 导出
 `registerExtraMode()`，`src/client/index.ts` 用它把 `SessionMapView` 注册为
 🗺 模式标签页（不再占用独立的 `conversation.view` 插槽），首页也有一键打开入口。
+渲染层是 **SVG 闭环轮环图**（`src/client/LoopMap.tsx` + `model.ts#loopLayout`），
+取代了原先 Three.js 的横向条状执行线：每个轮次一个同心圆环、子 Agent 分叉环，
+闭合/进行中/失败由颜色、虚线与脉冲动画表达；`verify-build` 会断言 bundle 中
+不再包含 `WebGLRenderer`。
 
 首页的闭环模型由 host 半 `buildClosure()`（`src/host/narrative.ts`）在
 `/api/tree` 响应中随 `closure` 字段返回：轮次/步骤/工具调用/审批四类「环」的
 开始-结束配对、闭合状态与嵌套关系，前端零额外请求。
 
-`react` / `react-dom` / `@deepseek-ai/*` 一律标记 external，由 DSH 运行时注入；
-`three` 内联进产物。`lib/` 下还存放 Python 版查看器的 `*.py`，因此两个构建配置
+`react` / `react-dom` / `@deepseek-ai/*` 一律标记 external，由 DSH 运行时注入。
+`lib/` 下还存放 Python 版查看器的 `*.py`，因此两个构建配置
 都必须 `clean: false`（`scripts/verify-build.mjs` 会校验它们没被清理掉）。
 
 类型方面，本仓库不导入 `@deepseek-ai` 的类型，而是在 `src/harness-shims.d.ts`
@@ -256,9 +260,10 @@ python run_tests.py  # Python 解析器测试
 
 本仓库以 **Apache-2.0** 分发。
 
-「会话图」视图融合自 [lhwu1/dsh-seelog](https://github.com/lhwu1/dsh-seelog)
-（**MIT License**），涉及文件：`src/client/{FlowScene.tsx,SessionMapView.tsx,model.ts,semantic.ts,styles.ts}`、
-`src/shared/flow.ts`、`src/host/map-web.ts`、`tests/{model,semantic}.spec.ts`——
-均在文件头保留了 MIT 署名，完整许可文本见
-[LICENSE.dsh-seelog.MIT](LICENSE.dsh-seelog.MIT)。Three.js 以 MIT 许可随客户端
-bundle 分发。
+「会话图」视图基于 [lhwu1/dsh-seelog](https://github.com/lhwu1/dsh-seelog)
+（**MIT License**）融合：保留了 seelog 的数据模型、语义层与快照路由
+（`src/shared/flow.ts`、`src/client/{model,semantic,styles}.ts`、
+`src/client/SessionMapView.tsx`、`src/host/map-web.ts`、
+`tests/{model,semantic}.spec.ts`），渲染层由 Three.js 横向执行线改为自研的
+SVG 闭环轮环图（`src/client/LoopMap.tsx`）。上述保留文件均在文件头保留了 MIT
+署名，完整许可文本见 [LICENSE.dsh-seelog.MIT](LICENSE.dsh-seelog.MIT)。

@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-viz",
   "version": "1.1.0",
-  "description": "AgentTrace 智能体轨迹：DSH 会话日志可视化插件——三层渐进式查看器（摘要/故事线/事件树）+ 四层进度体系 + 可折叠 JSON 查看器 + 3D 会话图（主执行线/子 Agent 分叉/时间概览尺，融合 dsh-seelog）。host 与 client 半均由 tsdown 构建，随 harness 启动。",
+  "description": "AgentTrace 智能体轨迹：DSH 会话日志可视化插件——首页闭环总览 + 三层渐进式查看器（摘要/故事线/事件树）+ 四层进度体系 + 可折叠 JSON 查看器 + SVG 闭环轮环图会话图（每个轮次一个环、子 Agent 分叉环，融合 dsh-seelog）。host 与 client 半均由 tsdown 构建，随 harness 启动。",
   "type": "module",
   "main": "lib/host/index.mjs",
   "exports": {
@@ -65,7 +65,7 @@
     "timeline",
     "jsonl",
     "session-map",
-    "threejs"
+    "ring-map"
   ],
   "scripts": {
     "build": "pnpm exec tsdown -c tsdown.config.ts && node scripts/verify-build.mjs",
@@ -79,9 +79,7 @@
   "devDependencies": {
     "@types/node": "^26.2.0",
     "@types/react": "~18.3.0",
-    "@types/three": "^0.180.0",
     "react": "^18.3.0",
-    "three": "^0.180.0",
     "tsdown": "^0.22.14",
     "typescript": "^7.0.2",
     "vitest": "^3.2.0"

@@ -65,7 +65,7 @@ try {
   process.exit(1)
 }
 
-// client bundle：必须带 loader 包装，且两个视图的关键标识都在
+// client bundle：必须带 loader 包装，且所有视图的关键标识都在
 try {
   const client = readFileSync(join(root, "lib/client.js"), "utf8")
   const checks = [
@@ -78,12 +78,18 @@ try {
     ["extraModes.map", "额外模式渲染循环缺失"],
     ["dsh-session-viz/api/map/snapshot", "会话图快照请求路径缺失"],
     ["dsvz-home", "首页闭环总览视图缺失"],
+    ["seelogRingWrap", "闭环轮环图容器缺失"],
+    ["loopLayout", "闭环轮环图布局缺失"],
+    ["seelogRingTip", "闭环轮环图 tooltip 缺失"],
   ]
   for (const [needle, message] of checks) {
     if (!client.includes(needle)) throw new Error(`${message}（未找到 ${needle}）`)
   }
+  // Three.js 已从渲染层移除：bundle 不应再包含 WebGLRenderer，体积应大幅回落
+  if (client.includes("WebGLRenderer")) throw new Error("bundle 仍包含 Three.js（应已移除）")
   const kb = Math.round(client.length / 1024)
-  console.log(`verify-build: client bundle OK (${kb} KB，含 Three.js 会话图)`)
+  if (kb > 500) throw new Error(`client bundle 异常偏大（${kb} KB），疑似 Three.js 未被摇树`)
+  console.log(`verify-build: client bundle OK (${kb} KB，SVG 闭环轮环图，无 Three.js)`)
 } catch (e) {
   console.error("verify-build: client smoke FAILED:", e.message)
   process.exit(1)
