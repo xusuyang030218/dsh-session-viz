@@ -314,6 +314,34 @@ body[data-ds-dark-theme] .dsvz-header-btn.active{border-color:#5690fe;color:#569
 .dsvz-ring-more{font-size:10px;color:var(--dsw-alias-label-secondary,#8493ab)}
 .dsvz-home-actions{display:flex;gap:10px;flex-wrap:wrap}
 .dsvz-home-btn{font-size:12.5px!important;padding:7px 16px!important}
+
+/* ===== 首页 v2：轮次时间线 ===== */
+.dsvz-home-card-top{display:flex;align-items:center;gap:8px}
+.dsvz-home-card-icon{font-size:18px}
+.dsvz-home-card-label{font-size:12px;color:var(--dsw-alias-label-secondary,#8493ab);font-weight:600}
+.dsvz-turnlist{display:flex;flex-direction:column;gap:12px}
+.dsvz-turnrow{border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.16));border-radius:14px;background:var(--dsw-alias-surface-subtle,rgba(128,128,128,.03));overflow:hidden;transition:border-color .15s,box-shadow .15s}
+.dsvz-turnrow:hover{border-color:var(--dsw-alias-brand-primary-new-colorprimary-new-color,#2563eb);box-shadow:0 3px 14px rgba(37,99,235,.10)}
+.dsvz-turnrow.open{border-color:rgba(245,158,11,.5)}
+.dsvz-turnrow-main{display:flex;gap:16px;padding:14px 16px;cursor:pointer;align-items:flex-start}
+.dsvz-thumb{flex-shrink:0}
+.dsvz-turnrow-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.dsvz-turnrow-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.dsvz-turnrow-title{font-size:14px;font-weight:750}
+.dsvz-turnrow-chip{font-size:11px;font-weight:650;padding:2px 10px;border-radius:999px;border:1px solid}
+.dsvz-turnrow-count{font-size:11.5px;color:var(--dsw-alias-label-secondary,#8493ab)}
+.dsvz-turnrow-dur{font-size:11.5px;color:var(--dsw-alias-label-secondary,#8493ab);font-family:var(--dsw-font-mono,Consolas,monospace)}
+.dsvz-turnrow-steps{display:flex;flex-direction:column;gap:5px}
+.dsvz-steprow{display:flex;align-items:center;gap:8px;font-size:12px;padding:4px 8px;border-radius:8px;background:var(--dsw-specific-input-major,#fff);border:1px solid var(--dsw-alias-border-l2,rgba(128,128,128,.1))}
+.dsvz-steprow-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.dsvz-steprow-label{font-weight:650;white-space:nowrap}
+.dsvz-steprow-tools{display:flex;gap:4px;flex-wrap:wrap;flex:1;min-width:0}
+.dsvz-steprow-tool{font-size:10.5px;padding:1px 7px;border-radius:999px;border:1px solid rgba(128,128,128,.25);color:var(--dsw-alias-label-secondary,#8493ab);white-space:nowrap;max-width:130px;overflow:hidden;text-overflow:ellipsis}
+.dsvz-steprow-tool.err{border-color:#ef4444;color:#dc2626;background:rgba(239,68,68,.06)}
+.dsvz-steprow-tool.open{border-color:#f59e0b;color:#d97706;background:rgba(245,158,11,.08);animation:dsvz-pulse 1.6s ease-in-out infinite}
+.dsvz-steprow-more{font-size:10.5px;color:var(--dsw-alias-label-secondary,#8493ab)}
+.dsvz-steprow-dur{font-size:10.5px;color:var(--dsw-alias-label-secondary,#8493ab);font-family:var(--dsw-font-mono,Consolas,monospace);white-space:nowrap}
+.dsvz-pulse{animation:dsvz-pulse 1.6s ease-in-out infinite}
 @keyframes dsvz-pulse{0%,100%{opacity:1}50%{opacity:.45}}
 
 
@@ -934,7 +962,6 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
     // 闭合环 = 绿色实线；未闭合环 = 琥珀色虚线 + 脉冲动画（会话进行中/异常中断）；
     // 失败环 = 红色。点击环 → 跳到事件树对应 turn/step。
     function HomeView({ closure, meta, turns, onJump, onOpenTree, onOpenSummary, onOpenMap }) {
-      const [expandTurn, setExpandTurn] = React.useState(null) // 展开的 turn 序号（null=全部折叠为概览）
       if (!closure) return React.createElement('div', { className: 'dsvz-empty' }, '加载中…')
       const s = closure.summary
       const cards = [
@@ -943,110 +970,56 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
         { k: 'tool', icon: '🧰', label: '工具调用', total: s.tool.total, closed: s.tool.closed, open: s.tool.open, error: s.tool.error },
         { k: 'approval', icon: '🛡️', label: '审批', total: s.approval.total, closed: s.approval.closed, open: s.approval.open, error: s.approval.error },
       ]
-      // 环的圆环几何：内层 = 该层 children 的占比环
-      function ringArc(ring, radius) {
-        // 返回若干圆弧段：每一段是 [startFrac, endFrac, status]
-        const segs = []
-        const kids = ring.children || []
-        if (!kids.length) {
-          segs.push([0, 1, ring.status])
-          return segs
-        }
-        // 每个 child 按权重分一段（权重=耗时或 1）
-        const weights = kids.map((c) => Math.max(1, c.durationMs ?? 1))
-        const totalW = weights.reduce((a, b) => a + b, 0)
-        let acc = 0
-        kids.forEach((c, i) => {
-          const w = weights[i] / totalW
-          segs.push([acc, acc + w, c.status])
-          acc += w
-        })
-        return segs
-      }
-      // SVG 弧线 path：从 start 到 end（占比 0..1，0=12 点方向，顺时针）
-      function arcPath(frac0, frac1, radius) {
-        const a0 = -Math.PI / 2 + frac0 * Math.PI * 2
-        const a1 = -Math.PI / 2 + frac1 * Math.PI * 2
-        const cx = 0, cy = 0
-        const x0 = cx + radius * Math.cos(a0), y0 = cy + radius * Math.sin(a0)
-        const x1 = cx + radius * Math.cos(a1), y1 = cy + radius * Math.sin(a1)
+      const colorOf = (status) => status === 'closed' ? '#22c55e' : status === 'open' ? '#f59e0b' : '#ef4444'
+      const arcPath = (radius, frac0, frac1) => {
+        const a0 = -Math.PI / 2 + frac0 * Math.PI * 2 + 0.015
+        const a1 = -Math.PI / 2 + frac1 * Math.PI * 2 - 0.015
+        if (a1 <= a0) return ''
+        const x0 = radius * Math.cos(a0), y0 = radius * Math.sin(a0)
+        const x1 = radius * Math.cos(a1), y1 = radius * Math.sin(a1)
         const large = (frac1 - frac0) > 0.5 ? 1 : 0
         return `M ${x0.toFixed(2)} ${y0.toFixed(2)} A ${radius} ${radius} 0 ${large} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`
       }
-      const colorOf = (status) => status === 'closed' ? '#22c55e' : status === 'open' ? '#f59e0b' : '#ef4444'
-      const dashOf = (status) => status === 'open' ? '4 3' : null
-
-      // 单个 turn 的环（大圆 + 内层 step 环）
-      function TurnRing({ ring }) {
-        const expanded = expandTurn === ring.turn
-        const R = 64
+      // 轮次缩略环：外圈状态 + 内层按步骤占比分段
+      function TurnThumb({ ring }) {
+        const R = 40
         const kids = ring.children || []
-        const stepSegs = kids.map((st) => ringArc(st, R - 14)).flat()
-        // 外层 turn 环
-        const outer = ringArc(ring, R)
-        return React.createElement('div', {
-          className: 'dsvz-ring-turn' + (expanded ? ' expanded' : ''),
-          style: { cursor: 'pointer' },
-          onClick: (e) => { e.stopPropagation(); setExpandTurn(expanded ? null : ring.turn) },
-          title: `${ring.label}${ring.durationMs != null ? ` · ${fmtDur(ring.durationMs)}` : ''}`,
-        },
-          React.createElement('svg', { viewBox: '-80 -80 160 160', width: 160, height: 160 },
-            outer.map((seg, i) => React.createElement('circle', {
-              key: i, cx: 0, cy: 0, r: R, fill: 'none',
-              stroke: colorOf(seg[2]), strokeWidth: 6,
-              strokeDasharray: dashOf(seg[2]) ?? undefined,
-              strokeLinecap: 'round',
-              // 画弧段：用 dashoffset 技巧不可靠，改用 path
-            })),
-            // 简化：整环颜色 = 该 turn 状态；内层 step 环分段
-            React.createElement('circle', { cx: 0, cy: 0, r: R, fill: 'none', stroke: colorOf(ring.status), strokeWidth: 7, strokeDasharray: dashOf(ring.status) ?? undefined, strokeLinecap: 'round' }),
-            React.createElement('circle', { cx: 0, cy: 0, r: R - 14, fill: 'none', stroke: 'rgba(128,128,128,.18)', strokeWidth: 1 }),
-            stepSegs.map((seg, i) => React.createElement('path', { key: i, d: arcPath(seg[0], seg[1], R - 14), fill: 'none', stroke: colorOf(seg[2]), strokeWidth: 4, strokeDasharray: dashOf(seg[2]) ?? undefined, strokeLinecap: 'butt' })),
-            React.createElement('text', { x: 0, y: -6, textAnchor: 'middle', fontSize: 15, fontWeight: 800, fill: 'var(--dsw-alias-label-primary,#1e293b)' }, `T${ring.turn}`),
-            React.createElement('text', { x: 0, y: 12, textAnchor: 'middle', fontSize: 9.5, fill: 'var(--dsw-alias-label-secondary,#8493ab)' }, `${kids.length} 步`),
-          ),
-          React.createElement('div', { className: 'dsvz-ring-meta' },
-            React.createElement('span', { className: 'dsvz-ring-label' }, ring.label),
-            React.createElement('span', { className: 'dsvz-ring-status' }, ring.status === 'closed' ? '✓ 闭合' : ring.status === 'open' ? '◌ 进行中' : '✕ 失败'),
-            ring.durationMs != null && React.createElement('span', { className: 'dsvz-ring-dur' }, fmtDur(ring.durationMs)),
-          ),
-          expanded && React.createElement('div', { className: 'dsvz-ring-steps' },
-            kids.map((st, i) => React.createElement('div', {
-              key: i, className: 'dsvz-ring-step', style: { borderLeftColor: colorOf(st.status) },
-              onClick: (e) => { e.stopPropagation(); onJump && onJump(st) },
-              title: `跳到第 ${st.turn} 轮·第 ${st.step} 步`,
-            },
-              React.createElement('span', { className: 'dsvz-ring-dot', style: { background: colorOf(st.status) } }, st.status === 'open' ? '◌' : ''),
-              React.createElement('span', { className: 'dsvz-ring-step-label' }, st.label),
-              React.createElement('span', { className: 'dsvz-ring-step-tools' },
-                st.children.filter((c) => c.kind === 'tool').slice(0, 6).map((c, j) =>
-                  React.createElement('span', { key: j, className: 'dsvz-ring-tool' + (c.status === 'error' ? ' err' : c.status === 'open' ? ' open' : ''), title: `${c.label}${c.durationMs != null ? ' · ' + fmtDur(c.durationMs) : ''}${c.status === 'error' ? ' · 失败' : c.status === 'open' ? ' · 进行中' : ''}` }, c.label)),
-                st.children.filter((c) => c.kind === 'tool').length > 6 && React.createElement('span', { className: 'dsvz-ring-more' }, `+${st.children.filter((c) => c.kind === 'tool').length - 6}`),
-              ),
-              st.durationMs != null && React.createElement('span', { className: 'dsvz-ring-dur' }, fmtDur(st.durationMs)),
-            )),
-          ),
+        const segs = []
+        if (kids.length) {
+          const weights = kids.map((c) => Math.max(1, c.durationMs ?? 1))
+          const totalW = weights.reduce((a, b) => a + b, 0)
+          let acc = 0
+          kids.forEach((c, i) => { const w = weights[i] / totalW; segs.push([acc, acc + w, c.status]); acc += w })
+        } else segs.push([0, 1, ring.status])
+        const running = ring.status === 'open'
+        return React.createElement('svg', { viewBox: '-50 -50 100 100', width: 100, height: 100, className: 'dsvz-thumb' },
+          React.createElement('circle', { cx: 0, cy: 0, r: R, fill: 'none', stroke: colorOf(ring.status), strokeWidth: 4.5, strokeDasharray: running ? '5 4' : undefined, strokeLinecap: 'round', className: running ? 'dsvz-pulse' : undefined }),
+          React.createElement('circle', { cx: 0, cy: 0, r: R - 9, fill: 'none', stroke: 'rgba(128,128,128,.15)', strokeWidth: 1 }),
+          segs.map((seg, i) => React.createElement('path', { key: i, d: arcPath(R - 9, seg[0], seg[1]), fill: 'none', stroke: colorOf(seg[2]), strokeWidth: 5, strokeLinecap: 'butt', strokeDasharray: seg[2] === 'open' ? '4 3' : undefined, className: seg[2] === 'open' ? 'dsvz-pulse' : undefined })),
+          React.createElement('text', { x: 0, y: 4, textAnchor: 'middle', fontSize: 13, fontWeight: 800, fill: 'var(--dsw-alias-label-primary,#1e293b)' }, `T${ring.turn}`),
         )
       }
 
       return React.createElement('div', { className: 'dsvz-scroll' },
         React.createElement('div', { className: 'dsvz-home' },
+          // 顶部
           React.createElement('div', { className: 'dsvz-home-hero' },
             React.createElement('div', { className: 'dsvz-home-title' }, '会话过程'),
-            React.createElement('div', { className: 'dsvz-home-sub' }, '把整个会话拆成一圈圈「环」：每一轮、每一步、每一次工具调用、每一次审批，都有开始与结束。闭合的环是已完成的工作，未闭合的环是正在进行或中断的工作。'),
+            React.createElement('div', { className: 'dsvz-home-sub' }, '整个会话是一串「闭环」：每一轮、每一步、每一次工具调用与审批都有开始和结束。闭合环=已完成的工作；未闭合环=正在进行或中断的工作；红色=失败。点击任意一环直达事件树。'),
             React.createElement('div', { className: 'dsvz-home-legend' },
               React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#22c55e' } }), '闭合'),
               React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#f59e0b' } }), '进行中'),
               React.createElement('span', { className: 'dsvz-legend-item' }, React.createElement('span', { className: 'dsvz-legend-dot', style: { background: '#ef4444' } }), '失败'),
             ),
           ),
+          // 统计卡
           React.createElement('div', { className: 'dsvz-home-cards' },
             cards.map((c) => React.createElement('div', { key: c.k, className: 'dsvz-home-card' },
-              React.createElement('div', { className: 'dsvz-home-card-icon' }, c.icon),
-              React.createElement('div', { className: 'dsvz-home-card-body' },
-                React.createElement('div', { className: 'dsvz-home-card-label' }, c.label),
-                React.createElement('div', { className: 'dsvz-home-card-num' }, fmtNum(c.total)),
+              React.createElement('div', { className: 'dsvz-home-card-top' },
+                React.createElement('span', { className: 'dsvz-home-card-icon' }, c.icon),
+                React.createElement('span', { className: 'dsvz-home-card-label' }, c.label),
               ),
+              React.createElement('div', { className: 'dsvz-home-card-num' }, fmtNum(c.total)),
               React.createElement('div', { className: 'dsvz-home-card-stats' },
                 React.createElement('span', { className: 'dsvz-stat-ok' }, `✓ ${fmtNum(c.closed)}`),
                 c.open > 0 && React.createElement('span', { className: 'dsvz-stat-open' }, `◌ ${fmtNum(c.open)}`),
@@ -1054,8 +1027,9 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
               ),
             )),
           ),
+          // 进行中
           s.unclosed && s.unclosed.length > 0 && React.createElement('div', { className: 'dsvz-home-unclosed' },
-            React.createElement('div', { className: 'dsvz-home-unclosed-title' }, '◌ 进行中的工作（未闭合）'),
+            React.createElement('div', { className: 'dsvz-home-unclosed-title' }, `◌ 进行中的工作（${s.unclosed.length} 个未闭合环）`),
             React.createElement('div', { className: 'dsvz-home-unclosed-list' },
               s.unclosed.map((r, i) => React.createElement('div', { key: i, className: 'dsvz-home-unclosed-item' },
                 React.createElement('span', { className: 'dsvz-ring-dot', style: { background: '#f59e0b' } }),
@@ -1065,9 +1039,39 @@ body[data-ds-dark-theme] .dsvz-jmore{color:#5690fe}
               )),
             ),
           ),
-          React.createElement('div', { className: 'dsvz-home-rings' },
-            (closure.rings || []).map((ring) => React.createElement(TurnRing, { key: ring.id, ring })),
+          // 轮次时间线
+          React.createElement('div', { className: 'dsvz-turnlist' },
+            (closure.rings || []).map((ring) => {
+              const steps = ring.children || []
+              return React.createElement('div', { key: ring.id, className: 'dsvz-turnrow' + (ring.status === 'open' ? ' open' : '') },
+                React.createElement('div', { className: 'dsvz-turnrow-main', onClick: () => onJump && onJump(ring), title: '跳到事件树对应轮次', role: 'button', tabIndex: 0 },
+                  React.createElement(TurnThumb, { ring }),
+                  React.createElement('div', { className: 'dsvz-turnrow-info' },
+                    React.createElement('div', { className: 'dsvz-turnrow-head' },
+                      React.createElement('span', { className: 'dsvz-turnrow-title' }, ring.label),
+                      React.createElement('span', { className: 'dsvz-turnrow-chip', style: { color: colorOf(ring.status), borderColor: colorOf(ring.status) } },
+                        ring.status === 'closed' ? '✓ 闭合' : ring.status === 'open' ? '◌ 进行中' : '✕ 失败'),
+                      React.createElement('span', { className: 'dsvz-turnrow-count' }, `${steps.length} 步`),
+                      ring.durationMs != null && React.createElement('span', { className: 'dsvz-turnrow-dur' }, fmtDur(ring.durationMs)),
+                    ),
+                    React.createElement('div', { className: 'dsvz-turnrow-steps' },
+                      steps.map((st, i) => React.createElement('div', { key: i, className: 'dsvz-steprow' },
+                        React.createElement('span', { className: 'dsvz-steprow-dot', style: { background: colorOf(st.status) } }),
+                        React.createElement('span', { className: 'dsvz-steprow-label' }, st.label),
+                        React.createElement('span', { className: 'dsvz-steprow-tools' },
+                          st.children.filter((c) => c.kind === 'tool').slice(0, 5).map((c, j) =>
+                            React.createElement('span', { key: j, className: 'dsvz-steprow-tool' + (c.status === 'error' ? ' err' : c.status === 'open' ? ' open' : ''), title: `${c.label}${c.durationMs != null ? ' · ' + fmtDur(c.durationMs) : ''}${c.status === 'error' ? ' · 失败' : c.status === 'open' ? ' · 进行中' : ''}` }, c.label)),
+                          st.children.filter((c) => c.kind === 'tool').length > 5 && React.createElement('span', { className: 'dsvz-steprow-more' }, `+${st.children.filter((c) => c.kind === 'tool').length - 5}`),
+                        ),
+                        st.durationMs != null && React.createElement('span', { className: 'dsvz-steprow-dur' }, fmtDur(st.durationMs)),
+                      )),
+                    ),
+                  ),
+                ),
+              )
+            }),
           ),
+          // 操作
           React.createElement('div', { className: 'dsvz-home-actions' },
             React.createElement('button', { className: 'dsvz-btn dsvz-home-btn', onClick: onOpenSummary }, '📋 查看执行摘要'),
             React.createElement('button', { className: 'dsvz-btn dsvz-home-btn', onClick: onOpenTree }, '🔬 查看事件树'),

@@ -280,16 +280,17 @@ export function buildClosure(objs: Array<Record<string, unknown> | null>): Closu
     }
     if (t === "tool/call") {
       const callId = String(d.callId ?? `call-${i}`)
+      const rawName = String(d.name ?? "工具")
       const ring: ClosureRing = {
         id: `tool-${callId}`,
         kind: "tool",
-        label: String(d.name ?? "工具"),
+        label: toolZh(rawName),
         turn: (curTurnRing?.turn) ?? (d.turn as number | undefined),
         step: curStepRing?.step,
         status: "open",
         openLine: i,
         openTime: time,
-        detail: String(d.name ?? ""),
+        detail: rawName,
         children: [],
       }
       toolCalls.set(callId, ring)
@@ -394,6 +395,23 @@ const TOOL_HUMAN: Record<string, { icon: string; verb: string }> = {
 
 function humanTool(name: string): { icon: string; verb: string } {
   return TOOL_HUMAN[name] ?? { icon: "🛠️", verb: `调用了 ${name}` }
+}
+
+/** 工具中文显示名（闭环模型/首页/会话图标签用）。 */
+const TOOL_ZH: Record<string, string> = {
+  read: "读取文件", write: "写入文件", edit: "编辑文件", glob: "搜索文件", grep: "搜索关键词", rg: "搜索关键词",
+  list_files: "列出目录", search_files: "搜索文件", apply_patch: "应用补丁", exec_command: "执行命令",
+  pwsh: "PowerShell", bash: "终端命令", dsh: "终端命令", dsh_web: "网页命令",
+  web_search: "网页搜索", web_fetch: "网页读取", todo_write: "任务清单", skill: "技能",
+  subagent: "子任务", ask_user_question: "询问用户", imagegen: "生成图片",
+  sandbox_start: "启动沙盒", sandbox_list: "沙盒列表", sandbox_stop: "停止沙盒", sandbox_destroy: "销毁沙盒",
+  sandbox_logs: "沙盒日志", sandbox_build: "沙盒构建", code_workbench: "代码工作台",
+  import_document: "导入文档", recommend_plugins: "插件推荐", search_plugins: "插件搜索", rank_plugins: "插件榜",
+  trend_plugins: "插件趋势", sync_registry: "同步插件数据",
+}
+
+function toolZh(name: string): string {
+  return TOOL_ZH[name] ?? name
 }
 
 /** 工具调用 → 人类语言句子。 */

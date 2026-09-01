@@ -36,7 +36,7 @@ describe('loopLayout', () => {
     expect(layout.turns).toHaveLength(2)
     expect(layout.turns[0]!.turn).toBe(1)
     expect(layout.turns[0]!.status).toBe('completed')
-    expect(layout.turns[0]!.radius).toBeLessThan(layout.turns[1]!.radius)
+    expect(layout.turns[0]!.radius).toBe(layout.turns[1]!.radius) // 每轮一张卡片，半径固定
     expect(layout.turns[1]!.status).toBe('error')
     // 节点落点在环上（半径为环半径）
     const ringNode = layout.turns[0]!.nodes[0]!
@@ -78,6 +78,7 @@ describe('loopLayout', () => {
     expect(layout.branches).toHaveLength(1)
     const branch = layout.branches[0]!
     expect(branch.session.id).toBe('child')
+    expect(branch.parentTurn).toBe(1) // 分叉时间 50 落在第 1 轮 [0,100] 内
     expect(typeof branch.forkAngle).toBe('number')
     expect(typeof branch.mergeAngle).toBe('number')
     expect(branch.nodes).toHaveLength(2)

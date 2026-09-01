@@ -170,25 +170,26 @@ export interface RingStep {
   readonly nodes: readonly RingNode[]
 }
 
-/** 一个轮次的闭环。 */
+/** 一个轮次的闭环（每轮一张卡片，半径固定）。 */
 export interface TurnRing {
   readonly turn: number
   readonly radius: number
   readonly status: FlowNode["status"]
   readonly steps: readonly RingStep[]
   readonly nodes: readonly RingNode[]
+  readonly startTime: number
+  readonly endTime: number
+  readonly durationMs?: number
 }
 
-/** 子 Agent 的分叉环：从主环分叉出去、执行后汇回。 */
+/** 子 Agent 的分叉迷你环：挂在父轮环旁（本地坐标，组件负责定位）。 */
 export interface BranchLoop {
   readonly session: FlowSession
-  readonly cx: number
-  readonly cy: number
+  /** 父轮序号（分叉时间落在哪个轮）。 */
+  readonly parentTurn: number
   readonly radius: number
   readonly forkAngle: number
   readonly mergeAngle: number
-  /** 分叉点所在的主环半径（用于画分叉/汇回连接线）。 */
-  readonly forkRadius: number
   readonly status: FlowNode["status"]
   readonly nodes: readonly RingNode[]
 }
@@ -199,10 +200,8 @@ export interface LoopLayout {
   readonly maxRadius: number
 }
 
-const LOOP_BASE_RADIUS = 64
-const LOOP_RING_STEP = 30
-const LOOP_BRANCH_RADIUS = 22
-const LOOP_BRANCH_GAP = 20
+const LOOP_RING_RADIUS = 74
+const LOOP_BRANCH_RADIUS = 34
 
 function statusOfNodes(nodes: readonly FlowNode[]): FlowNode["status"] {
   if (nodes.some((node) => node.status === "error")) return "error"
@@ -210,23 +209,23 @@ function statusOfNodes(nodes: readonly FlowNode[]): FlowNode["status"] {
   return "completed"
 }
 
-/** 在根会话节点中找时间最近的节点，返回它的角度。 */
-function nearestAngle(sorted: readonly FlowNode[], byId: ReadonlyMap<string, number>, time: number): number | undefined {
-  if (sorted.length === 0) return undefined
-  let best = sorted[0]!
+/** 在节点集中找时间最近的节点，返回它的角度。 */
+function nearestAngleOf(nodes: readonly RingNode[], time: number): number | undefined {
+  if (nodes.length === 0) return undefined
+  let best = nodes[0]!
   let bestDistance = Infinity
-  for (const node of sorted) {
-    const distance = Math.abs(node.time - time)
-    if (distance < bestDistance) { bestDistance = distance; best = node }
+  for (const ringNode of nodes) {
+    const distance = Math.abs(ringNode.node.time - time)
+    if (distance < bestDistance) { bestDistance = distance; best = ringNode }
   }
-  return byId.get(best.id)
+  return best.angle
 }
 
 /**
- * 把会话快照布局为「闭环轮环图」：
- * 根会话的每个轮次 = 一个同心圆环（T1 在内、越靠外越晚），环上按时间把步骤切成弧段，
- * 节点落点在环上；子 Agent = 从分叉角度伸出的小环（分叉→执行→汇回）。
- * 闭合/进行中/失败由环的状态颜色、虚线与脉冲动画表达。
+ * 把会话快照布局为「闭环轮环卡片」：
+ * 根会话的每个轮次 = 一张独立卡片里的一个闭环（半径固定），环上按时间把步骤切成
+ * 弧段、节点落点在环上；子 Agent = 挂在父轮环旁的迷你分叉环（分叉→执行→汇回，
+ * 组件负责定位）。闭合/进行中/失败由状态颜色、虚线与脉冲动画表达。
  */
 export function loopLayout(snapshot: SessionFlowSnapshot): LoopLayout {
   const root = snapshot.sessions.find((session) => session.id === snapshot.rootSessionId) ?? snapshot.sessions[0]
@@ -238,19 +237,16 @@ export function loopLayout(snapshot: SessionFlowSnapshot): LoopLayout {
     list.push(node)
     byTurn.set(turn, list)
   }
-  const angleById = new Map<string, number>()
   const turns: TurnRing[] = []
-  for (const [index, turn] of [...byTurn.keys()].sort((a, b) => a - b).entries()) {
+  for (const turn of [...byTurn.keys()].sort((a, b) => a - b)) {
     const nodes = byTurn.get(turn)!
     const sorted = [...nodes].sort((a, b) => a.time - b.time || a.seq - b.seq)
     const first = sorted[0]!
     const last = sorted.at(-1)!
     const span = Math.max(1, last.time - first.time)
-    const radius = LOOP_BASE_RADIUS + index * LOOP_RING_STEP
     const ringNodes: RingNode[] = sorted.map((node) => {
       const angle = -Math.PI / 2 + ((node.time - first.time) / span) * Math.PI * 2
-      angleById.set(node.id, angle)
-      return { node, angle, x: radius * Math.cos(angle), y: radius * Math.sin(angle) }
+      return { node, angle, x: LOOP_RING_RADIUS * Math.cos(angle), y: LOOP_RING_RADIUS * Math.sin(angle) }
     })
     // 按 step 分组为弧段（无 step 的事件各自成段）
     const steps: RingStep[] = []
@@ -280,41 +276,55 @@ export function loopLayout(snapshot: SessionFlowSnapshot): LoopLayout {
         nodes: current,
       })
     }
-    turns.push({ turn, radius, status: statusOfNodes(nodes), steps, nodes: ringNodes })
+    turns.push({
+      turn,
+      radius: LOOP_RING_RADIUS,
+      status: statusOfNodes(nodes),
+      steps,
+      nodes: ringNodes,
+      startTime: first.time,
+      endTime: last.endTime ?? last.time,
+      durationMs: last.endTime !== undefined ? Math.max(0, last.endTime - first.time) : undefined,
+    })
   }
 
-  // 子 Agent：从分叉角度伸出的小环
+  // 子 Agent：挂在父轮环旁的分叉迷你环（本地坐标，组件负责定位）
   const branches: BranchLoop[] = []
   for (const session of snapshot.sessions) {
     if (session.id === root?.id) continue
     const nodes = orderedNodes(session.nodes)
     const last = nodes.at(-1)
-    const forkAngle = nearestAngle(rootNodes, angleById, session.createdAt) ?? 0
-    const mergeAngle = nearestAngle(rootNodes, angleById, last?.endTime ?? last?.time ?? session.createdAt) ?? forkAngle
-    // 分叉所在轮环的半径
-    let forkRadius = LOOP_BASE_RADIUS
+    // 父轮：分叉时间落在哪个轮的时间范围内
+    const forkTime = session.createdAt
+    let parentTurn = turns[0]?.turn ?? 1
     for (const ring of turns) {
-      const first = ring.nodes[0]
-      const ringLast = ring.nodes.at(-1)
-      if (first !== undefined && ringLast !== undefined && session.createdAt >= first.node.time && session.createdAt <= ringLast.node.time) {
-        forkRadius = ring.radius
+      if (ring.startTime <= forkTime && forkTime <= (ring.endTime ?? ring.startTime)) {
+        parentTurn = ring.turn
         break
       }
     }
-    const radius = LOOP_BRANCH_RADIUS
-    const distance = forkRadius + radius + LOOP_BRANCH_GAP
-    const cx = distance * Math.cos(forkAngle)
-    const cy = distance * Math.sin(forkAngle)
+    const parentRing = turns.find((ring) => ring.turn === parentTurn)
+    const forkAngle = parentRing !== undefined ? nearestAngleOf(parentRing.nodes, forkTime) ?? 0 : 0
+    const mergeAngle = parentRing !== undefined
+      ? nearestAngleOf(parentRing.nodes, last?.endTime ?? last?.time ?? forkTime) ?? forkAngle
+      : forkAngle
     const firstNode = nodes[0]
-    const startTime = firstNode?.time ?? session.createdAt
-    const span = Math.max(1, (last?.time ?? session.createdAt) - startTime)
+    const startTime = firstNode?.time ?? forkTime
+    const span = Math.max(1, (last?.time ?? forkTime) - startTime)
     const branchNodes: RingNode[] = nodes.map((node) => {
       const angle = -Math.PI / 2 + ((node.time - startTime) / span) * Math.PI * 2
-      return { node, angle, x: cx + radius * Math.cos(angle), y: cy + radius * Math.sin(angle) }
+      return { node, angle, x: LOOP_BRANCH_RADIUS * Math.cos(angle), y: LOOP_BRANCH_RADIUS * Math.sin(angle) }
     })
-    branches.push({ session, cx, cy, radius, forkAngle, mergeAngle, forkRadius, status: statusOfNodes(nodes), nodes: branchNodes })
+    branches.push({
+      session,
+      parentTurn,
+      radius: LOOP_BRANCH_RADIUS,
+      forkAngle,
+      mergeAngle,
+      status: statusOfNodes(nodes),
+      nodes: branchNodes,
+    })
   }
 
-  const maxRadius = turns.length > 0 ? turns.at(-1)!.radius + LOOP_RING_STEP : LOOP_BASE_RADIUS + LOOP_RING_STEP
-  return { turns, branches, maxRadius }
+  return { turns, branches, maxRadius: LOOP_RING_RADIUS }
 }

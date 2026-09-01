@@ -44,7 +44,7 @@ describe('buildClosure', () => {
     expect(model.summary.tool.open).toBe(1)
     expect(model.summary.tool.closed).toBe(0)
     expect(model.summary.unclosed).toHaveLength(1)
-    expect(model.summary.unclosed[0]?.label).toBe('pwsh')
+    expect(model.summary.unclosed[0]?.label).toBe('PowerShell')
     expect(model.summary.unclosed[0]?.status).toBe('open')
   })
 
