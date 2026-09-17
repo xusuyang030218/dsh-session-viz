@@ -178,6 +178,22 @@ function projectEvents(sessionId: string, events: readonly SessionEvent[], maxim
   return { nodes, omittedEvents, rewindCount: markerSeqs.size, withdrawnEventCount: withdrawnSeqs.size }
 }
 
+function sessionCandidates(sessionId: string): string[] {
+  const candidates = [sessionId]
+  const aa = /^aa_[0-9a-f]{16}_(.+)$/.exec(sessionId)
+  if (aa?.[1]) candidates.push(aa[1])
+  return [...new Set(candidates)]
+}
+
+async function resolveSessionId(ctx: Context, sessionId: string): Promise<string> {
+  let lastError: unknown
+  for (const candidate of sessionCandidates(sessionId)) {
+    try { await ctx.sessionQuery.traceSession(SessionId(candidate)); return candidate }
+    catch (error) { lastError = error }
+  }
+  throw lastError instanceof Error ? lastError : new Error(`session log not found: ${sessionId}`)
+}
+
 function descendantIds(nodes: readonly SessionLineageNode[]): string[] {
   const ids: string[] = []
   const pending = [...nodes]
@@ -253,7 +269,8 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       try {
-        sendJson(response, 200, await snapshot(ctx, sessionId, config))
+        const resolvedId = await resolveSessionId(ctx, sessionId)
+        sendJson(response, 200, await snapshot(ctx, resolvedId, config))
       } catch (error: unknown) {
         sendJson(response, 404, { ok: false, code: error instanceof Error && error.message.includes('not found') ? 'SESSION_LOG_NOT_FOUND' : 'SESSION_READ_FAILED', error: error instanceof Error ? error.message : String(error) })
       }
@@ -274,8 +291,9 @@ export function apply(ctx: Context, config: Config): void {
         return
       }
       try {
+        const resolvedId = await resolveSessionId(ctx, location.sessionId)
         const event = await ctx.sessionQuery.readEvent({
-          sessionId: SessionId(location.sessionId), seq: location.seq, before: 2, after: 2,
+          sessionId: SessionId(resolvedId), seq: location.seq, before: 2, after: 2,
         })
         sendJson(response, 200, { target: event.target, context: event.events })
       } catch (error: unknown) {
