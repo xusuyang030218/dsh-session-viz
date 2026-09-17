@@ -98,17 +98,30 @@ function parseQuery(url: URL): Query {
   }
 }
 
+function sessionCandidates(sessionId: string): string[] {
+  const candidates = [sessionId]
+  const aa = /^aa_[0-9a-f]{16}_(.+)$/.exec(sessionId)
+  if (aa?.[1]) candidates.push(aa[1])
+  return [...new Set(candidates)]
+}
+
 async function getCached(sessionsPath: string | null, sessionId: string, sessionQuery?: SessionQuery): Promise<CacheEntry> {
   const hit = CACHE.get(sessionId)
   if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit
   if (!sessionsPath && sessionQuery) {
-    const read = await sessionQuery.readSession(SessionId(sessionId))
-    const text = eventLogText(read)
-    const parsed = parseLogText(text)
-    parsed.meta.sizeBytes = Buffer.byteLength(text, "utf8")
-    const entry: CacheEntry = { parsed, text, path: `dsh-session-query:${sessionId}`, at: Date.now() }
-    CACHE.set(sessionId, entry)
-    return entry
+    let lastError: unknown
+    for (const candidate of sessionCandidates(sessionId)) {
+      try {
+        const read = await sessionQuery.readSession(SessionId(candidate))
+        const text = eventLogText(read)
+        const parsed = parseLogText(text)
+        parsed.meta.sizeBytes = Buffer.byteLength(text, "utf8")
+        const entry: CacheEntry = { parsed, text, path: `dsh-session-query:${candidate}`, at: Date.now() }
+        CACHE.set(sessionId, entry)
+        return entry
+      } catch (error) { lastError = error }
+    }
+    throw lastError instanceof Error ? lastError : new Error(`session log not found: ${sessionId}`)
   }
   if (!sessionsPath) throw new Error("sessionsPath 未配置，且 sessionQuery 不可用")
   try {
@@ -124,13 +137,19 @@ async function getCached(sessionsPath: string | null, sessionId: string, session
   } catch (error) {
     // Agent Anywhere 的逻辑会话可能由 sessionQuery 提供，而不落在旧版 sessionsPath 目录。
     if (sessionQuery) {
-      const read = await sessionQuery.readSession(SessionId(sessionId))
-      const text = eventLogText(read)
-      const parsed = parseLogText(text)
-      parsed.meta.sizeBytes = Buffer.byteLength(text, "utf8")
-      const entry: CacheEntry = { parsed, text, path: `dsh-session-query:${sessionId}`, at: Date.now() }
-      CACHE.set(sessionId, entry)
-      return entry
+      let lastError: unknown = error
+      for (const candidate of sessionCandidates(sessionId)) {
+        try {
+          const read = await sessionQuery.readSession(SessionId(candidate))
+          const text = eventLogText(read)
+          const parsed = parseLogText(text)
+          parsed.meta.sizeBytes = Buffer.byteLength(text, "utf8")
+          const entry: CacheEntry = { parsed, text, path: `dsh-session-query:${candidate}`, at: Date.now() }
+          CACHE.set(sessionId, entry)
+          return entry
+        } catch (queryError) { lastError = queryError }
+      }
+      throw lastError
     }
     throw error
   }
