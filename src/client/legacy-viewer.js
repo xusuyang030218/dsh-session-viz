@@ -659,8 +659,9 @@ body[data-ds-dark-theme] .dsvz-story-node.rewind .nh{color:#fbbf24}
     async function api(path) {
       const res = await fetch(path)
       if (!res.ok) {
-        let msg = res.statusText
-        try { msg = (await res.json()).error || msg } catch { /* ignore */ }
+        let payload = {}
+        try { payload = await res.json() } catch { /* ignore */ }
+        const msg = payload.hint ? `${payload.error || res.statusText}。${payload.hint}` : (payload.error || res.statusText)
         throw new Error(msg)
       }
       return res.json()

@@ -69,7 +69,10 @@ export function SessionMapView({ sessionId }: ConvViewProps) {
     setError(null)
     try {
       const response = await fetch(`/dsh-session-viz/api/map/snapshot?sessionId=${encodeURIComponent(String(sessionId))}`, { cache: 'no-store' })
-      if (!response.ok) throw new Error(`无法刷新会话图 (${String(response.status)})`)
+      if (!response.ok) {
+         const payload = await response.json().catch(() => ({})) as { error?: string, hint?: string }
+         throw new Error(payload.hint ? `${payload.error ?? '无法刷新会话图'}。${payload.hint}` : (payload.error ?? `无法刷新会话图 (${String(response.status)})`))
+       }
       const nextSnapshot = await response.json() as SessionFlowSnapshot
       if (sequence !== refreshSequence.current) return
       setSnapshot(nextSnapshot)

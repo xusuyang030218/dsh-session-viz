@@ -91,6 +91,7 @@ declare module '@deepseek-ai/dsh-session-query' {
   }
   /** 只读会话查询服务。 */
   export interface SessionQuery {
+    listSessions(signal?: AbortSignal): Promise<Array<{ header: { id: SessionIdValue } }>>
     traceSession(sessionId: SessionIdValue): Promise<SessionLineage>
     readSession(sessionId: SessionIdValue): Promise<SessionLogRead>
     readEvent(request: {

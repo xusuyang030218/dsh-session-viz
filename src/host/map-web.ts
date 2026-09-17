@@ -255,7 +255,7 @@ export function apply(ctx: Context, config: Config): void {
       try {
         sendJson(response, 200, await snapshot(ctx, sessionId, config))
       } catch (error: unknown) {
-        sendJson(response, 404, { error: error instanceof Error ? error.message : String(error) })
+        sendJson(response, 404, { ok: false, code: error instanceof Error && error.message.includes('not found') ? 'SESSION_LOG_NOT_FOUND' : 'SESSION_READ_FAILED', error: error instanceof Error ? error.message : String(error) })
       }
     },
   }), 'dsh-session-viz: session map snapshot endpoint')
@@ -279,7 +279,7 @@ export function apply(ctx: Context, config: Config): void {
         })
         sendJson(response, 200, { target: event.target, context: event.events })
       } catch (error: unknown) {
-        sendJson(response, 404, { error: error instanceof Error ? error.message : String(error) })
+        sendJson(response, 404, { ok: false, code: error instanceof Error && error.message.includes('not found') ? 'SESSION_LOG_NOT_FOUND' : 'SESSION_READ_FAILED', error: error instanceof Error ? error.message : String(error) })
       }
     },
   }), 'dsh-session-viz: session map event endpoint')
